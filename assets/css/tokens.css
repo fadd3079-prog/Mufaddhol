@@ -1,0 +1,128 @@
+/* Design tokens. Monochrome: off-white canvas, charcoal ink, graded greys. No pure black. */
+
+@font-face {
+  font-family: 'Mufaddhol Sans';
+  src: url('../fonts/AdwaitaSans-Variable.woff2') format('woff2'),
+    url('../fonts/AdwaitaSans-Variable.ttf') format('truetype');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+:root {
+  /* surfaces */
+  --canvas: #f3f2ee;
+  --canvas-soft: #ebe9e4;
+  --surface: #fbfaf8;
+  --charcoal: #1f1f1d;
+  --charcoal-2: #2e2d2a;
+
+  /* ink, graded by importance */
+  --ink: #1e1e1c;
+  --ink-2: #353431;
+  --ink-mute: #5c5a55;
+  --ink-faint: #686660;
+
+  --on-dark: #f3f2ee;
+  --on-dark-mute: #b0aea7;
+  --on-dark-faint: #8e8c85;
+
+  /* lines */
+  --hairline: #dbd9d3;
+  --hairline-strong: #c3c0b9;
+  --hairline-dark: rgba(243, 242, 238, 0.14);
+
+  /* aliases kept for shared components and admin */
+  --primary: var(--charcoal);
+  --primary-deep: var(--charcoal-2);
+  --on-primary: var(--on-dark);
+
+  /* typography: Adwaita Sans (bundled, variable 100-900) */
+  --font-sans: 'Mufaddhol Sans', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+
+  --fs-display-xl: clamp(2.5rem, 5.6vw, 4.75rem);
+  --fs-display-lg: clamp(1.75rem, 3vw, 2.5rem);
+  --fs-display-md: clamp(1.375rem, 2vw, 1.75rem);
+  --fs-heading-lg: 1.25rem;
+  --fs-body-lg: clamp(1.0625rem, 1.3vw, 1.25rem);
+  --fs-body-md: 1rem;
+  --fs-button-md: 0.9375rem;
+  --fs-button-cap: 0.875rem;
+  --fs-caption: 0.875rem;
+  --fs-micro: 0.75rem;
+
+  --fw-body: 400;
+  --fw-ui: 500;
+  --fw-heading: 540;
+  --fw-display: 580;
+  --fw-cap: 520;
+  --fw-strong: 600;
+
+  --lh-display: 0.92;
+  --lh-title: 1.08;
+  --lh-body: 1.6;
+  --lh-caption: 1.45;
+
+  --ls-display: -0.055em;
+  --ls-title: -0.035em;
+  --ls-heading: -0.02em;
+  --ls-display-xl: -0.04em;
+  --ls-display-lg: -0.03em;
+  --ls-display-md: -0.02em;
+  --ls-heading-lg: -0.01em;
+  --ls-body-lg: -0.005em;
+
+  /* radius */
+  --r-xs: 4px;
+  --r-sm: 6px;
+  --r-md: 10px;
+  --r-lg: 14px;
+  --r-xl: 20px;
+  --r-full: 999px;
+
+  /* spacing */
+  --s-xxs: 2px;
+  --s-xs: 4px;
+  --s-sm: 8px;
+  --s-md: 12px;
+  --s-lg: 16px;
+  --s-xl: 24px;
+  --s-xxl: 32px;
+  --s-huge: 64px;
+
+  /* elevation: only the floating header and dialogs lift off the page */
+  --shadow-1: 0 1px 2px rgba(30, 30, 28, 0.06);
+  --shadow-2: 0 10px 30px -12px rgba(30, 30, 28, 0.18);
+  --shadow-float: 0 10px 28px -12px rgba(30, 30, 28, 0.16), 0 2px 8px -2px rgba(30, 30, 28, 0.06);
+  --shadow-overlay: 0 40px 90px -20px rgba(20, 20, 18, 0.45);
+
+  /* motion */
+  --ease-spring: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-out: cubic-bezier(0.165, 0.84, 0.44, 1);
+
+  /* layout */
+  --nav-h: 80px;
+  --pill-h: 56px;
+  --pill-top: 14px;
+  --container: 1280px;
+  --gutter: clamp(20px, 4vw, 40px);
+  --section-y: clamp(80px, 11vw, 160px);
+  --section-y-sm: clamp(56px, 7vw, 96px);
+  --grid-gap: 20px;
+}
+
+@media (max-width: 1023px) {
+  :root {
+    --grid-gap: 16px;
+  }
+}
+
+@media (max-width: 767px) {
+  :root {
+    --nav-h: 68px;
+    --pill-h: 52px;
+    --pill-top: 10px;
+    --gutter: 20px;
+    --grid-gap: 12px;
+  }
+}

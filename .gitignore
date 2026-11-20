@@ -1,0 +1,30 @@
+# User uploads (keep folder structure and the PHP-execution guard)
+assets/uploads/covers/*
+assets/uploads/videos/*
+assets/uploads/details/*
+!assets/uploads/covers/.gitkeep
+!assets/uploads/videos/.gitkeep
+!assets/uploads/details/.gitkeep
+
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+
+# Editor and OS
+.idea/
+.vscode/
+.zed/
+*.swp
+*~
+.DS_Store
+Thumbs.db
+
+# Logs and temp
+*.log
+*.tmp
+.tmp_*
+
+# Local DB dumps
+*.sql.bak
+*.dump
