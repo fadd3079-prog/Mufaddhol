@@ -36,6 +36,7 @@ function admin_start(string $title, bool $withBar = true, string $bodyClass = ''
             <span class="admin-bar_scope">Admin</span>
           </a>
           <div class="admin-bar_actions">
+            <a class="admin-bar_link" href="account.php">Account</a>
             <a class="admin-bar_link" href="../index.php">View Site</a>
             <form method="post" action="logout.php">
               <?= csrf_field() ?>

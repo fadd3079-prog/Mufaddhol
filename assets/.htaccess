@@ -1,0 +1,13 @@
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  # Block direct browser-tab opening of personal logos, tech icons, and portfolio media.
+  RewriteCond %{HTTP:Sec-Fetch-Dest} ^document$ [NC]
+  RewriteRule ^(favicon\.ico|icons/.*|uploads/.*)$ - [F,L]
+</IfModule>
+
+<IfModule mod_headers.c>
+  <FilesMatch "\.(ico|png|jpe?g|webp|svg|mp4|webm)$">
+    Header set Content-Disposition "inline"
+    Header set X-Content-Type-Options "nosniff"
+  </FilesMatch>
+</IfModule>

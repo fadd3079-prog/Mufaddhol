@@ -34,11 +34,13 @@ try {
     exit;
 }
 
+$draftKey = $item ? 'edit-' . (int) $item['id'] : 'new';
+
 $vals = [
     'title' => $item['title'] ?? '',
     'category' => $item['category'] ?? CATEGORIES[0],
-    'is_featured' => (int) ($item['is_featured'] ?? 0),
     'media_mode' => $item['media_mode'] ?? 'image_only',
+    'video_url' => $item['video_url'] ?? '',
     'description' => $item['description'] ?? '',
     'tech_tags' => $item['tech_tags'] ?? '',
     'demo_url' => $item['demo_url'] ?? '',
@@ -54,8 +56,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $vals = [
             'title' => trim((string) ($_POST['title'] ?? '')),
             'category' => (string) ($_POST['category'] ?? ''),
-            'is_featured' => isset($_POST['is_featured']) ? 1 : 0,
             'media_mode' => (string) ($_POST['media_mode'] ?? 'image_only'),
+            'video_url' => trim((string) ($_POST['video_url'] ?? '')),
             'description' => trim((string) ($_POST['description'] ?? '')),
             'tech_tags' => (string) ($_POST['tech_tags'] ?? ''),
             'demo_url' => trim((string) ($_POST['demo_url'] ?? '')),
@@ -72,9 +74,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         if (!array_key_exists($vals['media_mode'], MEDIA_MODES)) {
             $errors[] = 'Choose a media mode.';
-        }
-        if ($vals['description'] === '') {
-            $errors[] = 'Description is required.';
         }
 
         $tags = $vals['category'] === 'Software Development' ? normalizeTechTags($vals['tech_tags']) : null;
@@ -97,12 +96,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $imageFile = $_FILES['main_image'] ?? null;
         $videoFile = $_FILES['main_video'] ?? null;
         $wantsVideo = $vals['media_mode'] !== 'image_only';
+        $videoUrl = null;
+
+        if ($wantsVideo && $vals['video_url'] !== '') {
+            try {
+                $videoUrl = clean_url($vals['video_url']);
+            } catch (InvalidArgumentException $e) {
+                $errors[] = 'Video Link: ' . $e->getMessage();
+            }
+        }
 
         if (!$item && !has_upload($imageFile)) {
             $errors[] = 'Main image is required.';
         }
-        if ($wantsVideo && !has_upload($videoFile) && empty($item['main_video'])) {
-            $errors[] = 'Main video is required for this media mode.';
+        if ($wantsVideo && !has_upload($videoFile) && empty($item['main_video']) && $videoUrl === null) {
+            $errors[] = 'Provide a Main Video file or a Video Link for this media mode.';
         }
         foreach ([$imageFile, $videoFile] as $file) {
             if ($file !== null && ($message = upload_error_message((int) $file['error'])) !== null) {
@@ -144,6 +152,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         $oldFiles[] = $mainVideo;
                     }
                     $mainVideo = null;
+                    $videoUrl = null;
                 }
 
                 $fields = [
@@ -152,24 +161,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $vals['media_mode'],
                     $mainImage,
                     $mainVideo,
+                    $videoUrl,
                     $ratio,
                     $vals['description'],
                     $tags,
                     $demoUrl,
                     $githubUrl,
-                    $vals['is_featured'],
                 ];
                 if ($item) {
                     $pdo->prepare(
                         'UPDATE portfolios SET category = ?, title = ?, media_mode = ?, main_image = ?, main_video = ?,
-                         aspect_ratio = ?, description = ?, tech_tags = ?, demo_url = ?, github_url = ?, is_featured = ?
+                         video_url = ?, aspect_ratio = ?, description = ?, tech_tags = ?, demo_url = ?, github_url = ?
                          WHERE id = ?'
                     )->execute([...$fields, $item['id']]);
                     $portfolioId = (int) $item['id'];
                 } else {
                     $pdo->prepare(
-                        'INSERT INTO portfolios (category, title, media_mode, main_image, main_video, aspect_ratio,
-                         description, tech_tags, demo_url, github_url, is_featured) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+                        'INSERT INTO portfolios (category, title, media_mode, main_image, main_video, video_url, aspect_ratio,
+                         description, tech_tags, demo_url, github_url) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
                     )->execute($fields);
                     $portfolioId = (int) $pdo->lastInsertId();
                 }
@@ -207,6 +216,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                 $pdo->commit();
                 delete_stored_files($oldFiles);
+                $_SESSION['clear_draft_key'] = $draftKey;
                 flash_set('success', $item ? 'Portfolio updated.' : 'Portfolio created.');
                 header('Location: index.php');
                 exit;
@@ -244,7 +254,7 @@ admin_start($item ? 'Edit Portfolio' : 'Add Portfolio', true, 'admin--form');
     </div>
 <?php endif; ?>
 
-<form method="post" enctype="multipart/form-data" class="form" id="portfolio-form" data-has-video="<?= $hasExistingVideo ? '1' : '0' ?>" data-editing="<?= $item ? '1' : '0' ?>">
+<form method="post" enctype="multipart/form-data" class="form" id="portfolio-form" data-has-video="<?= $hasExistingVideo ? '1' : '0' ?>" data-editing="<?= $item ? '1' : '0' ?>" data-draft-key="<?= e($draftKey) ?>">
     <?= csrf_field() ?>
 
     <div class="form_section">
@@ -262,11 +272,6 @@ admin_start($item ? 'Edit Portfolio' : 'Add Portfolio', true, 'admin--form');
                 </select>
             </div>
         </div>
-
-        <label class="check">
-            <input type="checkbox" name="is_featured" value="1" <?= $vals['is_featured'] ? ' checked' : '' ?>>
-            <span>Featured on the landing page</span>
-        </label>
     </div>
 
     <div class="form_section">
@@ -324,13 +329,18 @@ admin_start($item ? 'Edit Portfolio' : 'Add Portfolio', true, 'admin--form');
                     </div>
                 </div>
             </div>
+
+            <div class="field form_video-url" id="field-video-url" <?= $wantsVideoView ? '' : ' hidden' ?>>
+                <label for="video_url">Video Link</label>
+                <input class="input" type="url" id="video_url" name="video_url" maxlength="255" value="<?= e($vals['video_url']) ?>" placeholder="https://">
+            </div>
         </div>
     </div>
 
     <div class="form_section">
         <div class="field">
             <label for="description">Description</label>
-            <textarea class="input" id="description" name="description" rows="4" required><?= e($vals['description']) ?></textarea>
+            <textarea class="input" id="description" name="description" rows="4"><?= e($vals['description']) ?></textarea>
         </div>
 
         <div class="field" id="field-tags" <?= $isSoftware ? '' : ' hidden' ?>>
@@ -395,7 +405,7 @@ admin_start($item ? 'Edit Portfolio' : 'Add Portfolio', true, 'admin--form');
 
     <div class="form_actions">
         <button type="submit" class="btn"><?= $item ? 'Save Changes' : 'Create Portfolio' ?></button>
-        <a class="btn btn--outline" href="index.php">Cancel</a>
+        <a class="btn btn--outline" href="index.php" data-draft-clear>Cancel</a>
     </div>
 </form>
 <?php admin_end();

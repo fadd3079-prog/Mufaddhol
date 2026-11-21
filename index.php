@@ -5,24 +5,91 @@ declare(strict_types=1);
 require_once __DIR__ . '/config/layout.php';
 
 $works = [];
+$marqueeWorks = [];
 $categoryCounts = array_fill_keys(CATEGORIES, 0);
 $totalWorks = 0;
 $loadError = false;
 try {
-  $countStmt = db()->query('SELECT category, COUNT(*) AS cnt FROM portfolios GROUP BY category');
-  foreach ($countStmt->fetchAll() as $cRow) {
-    if (isset($categoryCounts[$cRow['category']])) {
-      $categoryCounts[$cRow['category']] = (int) $cRow['cnt'];
+  $stmt = db()->query('SELECT id, category, title, media_mode, main_image, main_video, video_url, aspect_ratio FROM portfolios');
+  $works = $stmt->fetchAll();
+
+  $workMap = [];
+  foreach ($works as $row) {
+    if (isset($categoryCounts[$row['category']])) {
+      $categoryCounts[$row['category']]++;
     }
-    $totalWorks += (int) $cRow['cnt'];
+    $totalWorks++;
+
+    $ratio = (float) ($row['aspect_ratio'] ?? 1.0);
+    if ($ratio <= 0) {
+      $ratio = 1.0;
+    }
+    $pid = (int) $row['id'];
+    $workMap[$pid] = [
+      'c' => (string) $row['category'],
+      't' => (string) $row['title'],
+      'img' => (string) $row['main_image'],
+      'r' => round($ratio, 4),
+    ];
+
+    $marqueeWorks[] = [
+      'k' => 'p-' . $pid,
+      'i' => $pid,
+      'c' => (string) $row['category'],
+      't' => (string) $row['title'],
+      'm' => (string) $row['media_mode'],
+      'img' => (string) $row['main_image'],
+      'vid' => $row['main_video'] ? (string) $row['main_video'] : null,
+      'ext' => !empty($row['video_url']) ? 1 : 0,
+      'r' => round($ratio, 4),
+    ];
   }
 
-  $stmt = db()->query('SELECT * FROM portfolios WHERE is_featured = 1 ORDER BY sort_order ASC, created_at DESC, id DESC LIMIT 8');
-  $works = $stmt->fetchAll();
-  if (count($works) < 1) {
-    $stmt = db()->query('SELECT * FROM portfolios ORDER BY sort_order ASC, created_at DESC, id DESC LIMIT 8');
-    $works = $stmt->fetchAll();
+  $detailStmt = db()->query('SELECT id, portfolio_id, file_path, media_type, caption FROM portfolio_details');
+  foreach ($detailStmt->fetchAll() as $dRow) {
+    $pid = (int) $dRow['portfolio_id'];
+    if (!isset($workMap[$pid])) {
+      continue;
+    }
+    $parent = $workMap[$pid];
+    $caption = trim((string) ($dRow['caption'] ?? ''));
+    $title = $caption !== '' ? $parent['t'] . ' — ' . $caption : $parent['t'];
+    $filePath = (string) $dRow['file_path'];
+
+    if ($dRow['media_type'] === 'video') {
+      $marqueeWorks[] = [
+        'k' => 'd-' . (int) $dRow['id'],
+        'i' => $pid,
+        'c' => $parent['c'],
+        't' => $title,
+        'm' => 'hover_video',
+        'img' => $parent['img'],
+        'vid' => $filePath,
+        'ext' => 0,
+        'r' => $parent['r'],
+      ];
+    } else {
+      $fullPath = __DIR__ . '/' . ltrim($filePath, '/');
+      $size = is_file($fullPath) ? @getimagesize($fullPath) : false;
+      $dRatio = ($size && $size[0] > 0 && $size[1] > 0)
+        ? max(0.45, min(2.2, round($size[1] / $size[0], 4)))
+        : $parent['r'];
+
+      $marqueeWorks[] = [
+        'k' => 'd-' . (int) $dRow['id'],
+        'i' => $pid,
+        'c' => $parent['c'],
+        't' => $title,
+        'm' => 'image_only',
+        'img' => $filePath,
+        'vid' => null,
+        'ext' => 0,
+        'r' => $dRatio,
+      ];
+    }
   }
+
+  shuffle($marqueeWorks);
 } catch (PDOException $e) {
   $loadError = true;
 }
@@ -94,10 +161,10 @@ render_nav('home');
   <section class="section" id="featured-works" aria-labelledby="featured-title">
     <div class="container">
       <div class="section-head">
-        <h2 id="featured-title" class="section_title">Selected work.</h2>
+        <h2 id="featured-title" class="section_title">Works.</h2>
         <?php if (!$loadError && count($works) > 0): ?>
           <div class="section-head_controls" id="filters">
-            <div class="filters_tabs" role="group" aria-label="Filter selected works by category">
+            <div class="filters_tabs" role="group" aria-label="Filter works by category">
               <button type="button" class="pill is-active" data-category="All" aria-pressed="true">All</button>
               <?php foreach (CATEGORIES as $category): ?>
                 <button type="button" class="pill" data-category="<?= e($category) ?>" aria-pressed="false"><?= e($category) ?></button>
@@ -114,29 +181,34 @@ render_nav('home');
       <?php elseif (count($works) === 0): ?>
         <div class="state">
           <p class="state_title">No works published yet</p>
-          <p>Add the first portfolio item from the administrative panel to populate this grid.</p>
+          <p>Add the first portfolio item from the administrative panel to populate this showcase.</p>
           <a class="btn btn--outline" href="admin/index.php">Open Admin Panel</a>
         </div>
       <?php else: ?>
-        <div id="masonry-grid" class="masonry">
-          <?php foreach ($works as $row) {
-            echo render_card($row), "\n";
-          } ?>
-        </div>
         <div id="empty-state" class="state" hidden>
-          <p class="state_title">No featured works in this category</p>
+          <p class="state_title">No works in this category</p>
           <p>Reset the category filter or browse the complete portfolio archive.</p>
           <div class="state_actions">
-            <button type="button" class="btn btn--outline" id="reset-filters">Show all selected</button>
+            <button type="button" class="btn btn--outline" id="reset-filters">Show all works</button>
             <a class="btn" href="portfolio.php">Open full archive</a>
           </div>
         </div>
-        <div class="section-foot">
-          <p class="section-foot_meta">Showing <?= count($works) ?> of <?= $totalWorks ?> published <?= $totalWorks === 1 ? 'work' : 'works' ?>.</p>
-          <a class="link-arrow" href="portfolio.php">See the full archive<span aria-hidden="true">&rarr;</span></a>
-        </div>
       <?php endif; ?>
     </div>
+    <?php if (!$loadError && count($works) > 0): ?>
+      <div id="work-marquee" class="work-marquee" aria-label="Portfolio showcase">
+        <div class="marquee-row" data-direction="-1" data-speed="38"></div>
+        <div class="marquee-row" data-direction="1" data-speed="34"></div>
+        <div class="marquee-row" data-direction="-1" data-speed="42"></div>
+      </div>
+      <script id="works-data" type="application/json"><?= json_encode($marqueeWorks, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP) ?></script>
+      <div class="container">
+        <div class="section-foot">
+          <p class="section-foot_meta"><?= $totalWorks ?> published <?= $totalWorks === 1 ? 'work' : 'works' ?>.</p>
+          <a class="link-arrow" href="portfolio.php">See the full archive<span aria-hidden="true">&rarr;</span></a>
+        </div>
+      </div>
+    <?php endif; ?>
   </section>
 
   <section class="section section--services" id="about" aria-labelledby="about-title">

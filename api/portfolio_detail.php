@@ -48,6 +48,7 @@ try {
             'media_mode' => $row['media_mode'],
             'main_image' => $row['main_image'],
             'main_video' => $row['main_video'],
+            'video_url' => $row['video_url'] ?? null,
             'aspect_ratio' => $row['aspect_ratio'],
             'description' => $row['description'],
             'tech_tags' => splitTags($row['tech_tags']),

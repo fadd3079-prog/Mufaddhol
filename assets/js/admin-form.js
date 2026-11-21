@@ -1,11 +1,56 @@
 (() => {
   'use strict';
 
-  document.querySelectorAll('form[data-confirm]').forEach((form) => {
-    form.addEventListener('submit', (e) => {
-      if (!window.confirm(form.dataset.confirm)) e.preventDefault();
+  const confirmDialog = document.getElementById('confirm-dialog');
+  const confirmTitle = document.getElementById('confirm-dialog-title');
+  const confirmCancel = confirmDialog?.querySelector('[data-confirm-cancel]');
+  const confirmOk = confirmDialog?.querySelector('[data-confirm-ok]');
+  let pendingConfirmForm = null;
+  let lastConfirmTrigger = null;
+
+  if (confirmDialog && typeof confirmDialog.showModal === 'function') {
+    const closeConfirm = () => {
+      if (confirmDialog.open) confirmDialog.close();
+      pendingConfirmForm = null;
+      if (lastConfirmTrigger && typeof lastConfirmTrigger.focus === 'function') {
+        lastConfirmTrigger.focus();
+      }
+      lastConfirmTrigger = null;
+    };
+
+    confirmCancel?.addEventListener('click', closeConfirm);
+    confirmDialog.addEventListener('cancel', (e) => {
+      e.preventDefault();
+      closeConfirm();
     });
-  });
+    confirmDialog.addEventListener('click', (e) => {
+      if (e.target === confirmDialog) closeConfirm();
+    });
+    confirmOk?.addEventListener('click', () => {
+      const form = pendingConfirmForm;
+      pendingConfirmForm = null;
+      lastConfirmTrigger = null;
+      if (confirmDialog.open) confirmDialog.close();
+      if (form) form.submit();
+    });
+
+    document.querySelectorAll('form[data-confirm]').forEach((form) => {
+      form.addEventListener('submit', (e) => {
+        e.preventDefault();
+        pendingConfirmForm = form;
+        lastConfirmTrigger = document.activeElement;
+        if (confirmTitle) confirmTitle.textContent = form.dataset.confirm || 'Confirm delete?';
+        confirmDialog.showModal();
+        confirmCancel?.focus();
+      });
+    });
+  } else {
+    document.querySelectorAll('form[data-confirm]').forEach((form) => {
+      form.addEventListener('submit', (e) => {
+        if (!window.confirm(form.dataset.confirm)) e.preventDefault();
+      });
+    });
+  }
 
   /* Custom select dropdown */
 
@@ -365,6 +410,86 @@
     });
   }
 
+  /* Draft persistence across accidental refresh (sessionStorage + IndexedDB for files) */
+
+  const DRAFT_DB_NAME = 'mufaddhol_admin_drafts';
+  const DRAFT_STORE = 'files';
+
+  function openDraftDb() {
+    if (!('indexedDB' in window)) return Promise.resolve(null);
+    return new Promise((resolve) => {
+      try {
+        const req = indexedDB.open(DRAFT_DB_NAME, 1);
+        req.onupgradeneeded = () => {
+          if (!req.result.objectStoreNames.contains(DRAFT_STORE)) {
+            req.result.createObjectStore(DRAFT_STORE);
+          }
+        };
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => resolve(null);
+      } catch {
+        resolve(null);
+      }
+    });
+  }
+
+  async function idbGet(key) {
+    const db = await openDraftDb();
+    if (!db) return null;
+    return new Promise((resolve) => {
+      try {
+        const tx = db.transaction(DRAFT_STORE, 'readonly');
+        const req = tx.objectStore(DRAFT_STORE).get(key);
+        req.onsuccess = () => resolve(req.result || null);
+        req.onerror = () => resolve(null);
+      } catch {
+        resolve(null);
+      }
+    });
+  }
+
+  async function idbSet(key, value) {
+    const db = await openDraftDb();
+    if (!db) return;
+    return new Promise((resolve) => {
+      try {
+        const tx = db.transaction(DRAFT_STORE, 'readwrite');
+        tx.objectStore(DRAFT_STORE).put(value, key);
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => resolve();
+      } catch {
+        resolve();
+      }
+    });
+  }
+
+  async function idbDelete(key) {
+    const db = await openDraftDb();
+    if (!db) return;
+    return new Promise((resolve) => {
+      try {
+        const tx = db.transaction(DRAFT_STORE, 'readwrite');
+        tx.objectStore(DRAFT_STORE).delete(key);
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => resolve();
+      } catch {
+        resolve();
+      }
+    });
+  }
+
+  function clearDraftStorage(key) {
+    if (!key) return;
+    try {
+      sessionStorage.removeItem(`portfolio-draft:${key}`);
+    } catch { /* ignore storage restrictions */ }
+    idbDelete(key);
+  }
+
+  document.querySelectorAll('[data-clear-draft]').forEach((el) => {
+    clearDraftStorage(el.dataset.clearDraft);
+  });
+
   const form = document.getElementById('portfolio-form');
   if (!form) return;
 
@@ -375,6 +500,8 @@
   const video = document.getElementById('main_video');
   const videoField = document.getElementById('field-video');
   const videoPreview = document.getElementById('video-preview');
+  const videoUrlField = document.getElementById('field-video-url');
+  const videoUrlInput = document.getElementById('video_url');
   const tagsField = document.getElementById('field-tags');
   const tagsInput = document.getElementById('tech_tags');
   const tagPreview = document.getElementById('tag-preview');
@@ -425,10 +552,18 @@
     });
   };
 
+  function syncVideoRequirement() {
+    const wantsVideo = currentMode() !== 'image_only';
+    const hasLink = videoUrlInput && videoUrlInput.value.trim() !== '';
+    const hasFile = (video.files && video.files.length > 0) || hasExistingVideo;
+    video.required = wantsVideo && !hasFile && !hasLink;
+  }
+
   function syncMode() {
     const wantsVideo = currentMode() !== 'image_only';
     videoField.hidden = !wantsVideo;
-    video.required = wantsVideo && !hasExistingVideo;
+    if (videoUrlField) videoUrlField.hidden = !wantsVideo;
+    syncVideoRequirement();
     const mediaGrid = videoField.closest('.form_media-grid');
     if (mediaGrid) mediaGrid.classList.toggle('has-video', wantsVideo);
   }
@@ -511,9 +646,11 @@
     const imageZone = mainImageInput.closest('.dropzone');
     mainImageInput.addEventListener('change', () => {
       if (mainImageInput.files[0]) renderSinglePreview(mainImageInput.files[0], coverPreview, false);
+      saveDraftFiles();
     });
     bindDropzone(imageZone, mainImageInput, (files) => {
       setSingleInputFile(mainImageInput, files[0], coverPreview, false);
+      saveDraftFiles();
     });
   }
 
@@ -521,10 +658,18 @@
     const videoZone = video.closest('.dropzone');
     video.addEventListener('change', () => {
       if (video.files[0]) renderSinglePreview(video.files[0], videoPreview, true);
+      syncVideoRequirement();
+      saveDraftFiles();
     });
     bindDropzone(videoZone, video, (files) => {
       setSingleInputFile(video, files[0], videoPreview, true);
+      syncVideoRequirement();
+      saveDraftFiles();
     });
+  }
+
+  if (videoUrlInput) {
+    videoUrlInput.addEventListener('input', syncVideoRequirement);
   }
 
   let previewUrls = [];
@@ -586,6 +731,7 @@
         queuedDetails.splice(i, 1);
         syncDetailsInputFiles();
         renderDetailPreview();
+        saveDraftFiles();
       });
       head.appendChild(removeBtn);
       card.appendChild(head);
@@ -604,6 +750,10 @@
       caption.maxLength = 150;
       caption.placeholder = 'Caption';
       caption.value = savedCaption || '';
+      caption.addEventListener('input', () => {
+        captureCaptions();
+        saveDraftFiles();
+      });
       card.appendChild(caption);
 
       detailPreview.appendChild(card);
@@ -615,6 +765,7 @@
     files.forEach((file) => queuedDetails.push({ file, caption: '' }));
     syncDetailsInputFiles();
     renderDetailPreview();
+    saveDraftFiles();
   }
 
   if (detailsInput && detailPreview) {
@@ -626,11 +777,147 @@
     bindDropzone(detailsZone, detailsInput, addDetailFiles);
   }
 
+  const draftKey = form.dataset.draftKey || '';
+  const draftStorageKey = draftKey ? `portfolio-draft:${draftKey}` : '';
+
+  function saveDraftFields() {
+    if (!draftStorageKey) return;
+    const existingCaptions = {};
+    form.querySelectorAll('input[name^="existing_captions["]').forEach((inp) => {
+      existingCaptions[inp.name] = inp.value;
+    });
+    const deleteDetails = Array.from(form.querySelectorAll('input[name="delete_details[]"]:checked'))
+      .map((cb) => cb.value);
+
+    const payload = {
+      title: form.elements.title?.value ?? '',
+      category: category?.value ?? '',
+      media_mode: currentMode(),
+      video_url: videoUrlInput?.value ?? '',
+      description: form.elements.description?.value ?? '',
+      tech_tags: tagsInput?.value ?? '',
+      demo_url: form.elements.demo_url?.value ?? '',
+      github_url: form.elements.github_url?.value ?? '',
+      existing_captions: existingCaptions,
+      delete_details: deleteDetails,
+    };
+    try {
+      sessionStorage.setItem(draftStorageKey, JSON.stringify(payload));
+    } catch { /* ignore quota/private mode */ }
+  }
+
+  function saveDraftFiles() {
+    if (!draftKey) return;
+    captureCaptions();
+    const payload = {
+      main_image: mainImageInput?.files?.[0] || null,
+      main_video: video?.files?.[0] || null,
+      details: queuedDetails.map((entry) => ({
+        file: entry.file,
+        caption: entry.caption || '',
+      })),
+    };
+    if (!payload.main_image && !payload.main_video && payload.details.length === 0) {
+      idbDelete(draftKey);
+      return;
+    }
+    idbSet(draftKey, payload);
+  }
+
+  function restoreDraftFields() {
+    if (!draftStorageKey) return;
+    let raw = null;
+    try {
+      raw = sessionStorage.getItem(draftStorageKey);
+    } catch {
+      return;
+    }
+    if (!raw) return;
+    let draft;
+    try {
+      draft = JSON.parse(raw);
+    } catch {
+      return;
+    }
+    if (!draft || typeof draft !== 'object') return;
+
+    if (typeof draft.title === 'string' && form.elements.title) form.elements.title.value = draft.title;
+    if (typeof draft.category === 'string' && category) {
+      category.value = draft.category;
+      category.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+    if (typeof draft.media_mode === 'string') {
+      modes.forEach((m) => {
+        m.checked = m.value === draft.media_mode;
+      });
+    }
+    if (typeof draft.video_url === 'string' && videoUrlInput) videoUrlInput.value = draft.video_url;
+    if (typeof draft.description === 'string' && form.elements.description) {
+      form.elements.description.value = draft.description;
+    }
+    if (typeof draft.tech_tags === 'string' && tagsInput) tagsInput.value = draft.tech_tags;
+    if (typeof draft.demo_url === 'string' && form.elements.demo_url) form.elements.demo_url.value = draft.demo_url;
+    if (typeof draft.github_url === 'string' && form.elements.github_url) form.elements.github_url.value = draft.github_url;
+
+    if (draft.existing_captions && typeof draft.existing_captions === 'object') {
+      form.querySelectorAll('input[name^="existing_captions["]').forEach((inp) => {
+        if (Object.prototype.hasOwnProperty.call(draft.existing_captions, inp.name)) {
+          inp.value = String(draft.existing_captions[inp.name] ?? '');
+        }
+      });
+    }
+    if (Array.isArray(draft.delete_details)) {
+      const delSet = new Set(draft.delete_details.map(String));
+      form.querySelectorAll('input[name="delete_details[]"]').forEach((cb) => {
+        cb.checked = delSet.has(String(cb.value));
+      });
+    }
+  }
+
+  async function restoreDraftFiles() {
+    if (!draftKey) return;
+    const saved = await idbGet(draftKey);
+    if (!saved || typeof saved !== 'object') return;
+
+    if (saved.main_image instanceof Blob && mainImageInput && coverPreview) {
+      setSingleInputFile(mainImageInput, saved.main_image, coverPreview, false);
+      mainImageInput.required = false;
+    }
+    if (saved.main_video instanceof Blob && video && videoPreview) {
+      setSingleInputFile(video, saved.main_video, videoPreview, true);
+      syncVideoRequirement();
+    }
+    if (Array.isArray(saved.details) && saved.details.length && detailsInput && detailPreview) {
+      queuedDetails = saved.details
+        .filter((d) => d && d.file instanceof Blob)
+        .map((d) => ({ file: d.file, caption: String(d.caption || '') }));
+      if (queuedDetails.length) {
+        syncDetailsInputFiles();
+        renderDetailPreview();
+      }
+    }
+  }
+
+  form.addEventListener('input', (e) => {
+    if (e.target.type === 'file') return;
+    saveDraftFields();
+  });
+  form.addEventListener('change', (e) => {
+    if (e.target.type === 'file') return;
+    saveDraftFields();
+  });
+
+  form.querySelectorAll('[data-draft-clear]').forEach((el) => {
+    el.addEventListener('click', () => clearDraftStorage(draftKey));
+  });
+
   modes.forEach((m) => m.addEventListener('change', syncMode));
   category.addEventListener('change', syncCategory);
   tagsInput.addEventListener('input', renderTags);
 
+  restoreDraftFields();
   syncMode();
   syncCategory();
   renderTags();
+  restoreDraftFiles();
 })();

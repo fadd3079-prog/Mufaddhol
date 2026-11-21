@@ -28,18 +28,17 @@ CREATE TABLE portfolios (
     'autoplay_video'
   ) NOT NULL DEFAULT 'image_only',
   main_image VARCHAR(255) NOT NULL COMMENT 'Required cover image or video poster thumbnail',
-  main_video VARCHAR(255) NULL COMMENT 'Required when media_mode is hover_video or autoplay_video',
+  main_video VARCHAR(255) NULL COMMENT 'Local preview/video file when media_mode is hover_video or autoplay_video',
+  video_url VARCHAR(255) NULL COMMENT 'Optional external video URL (YouTube, Vimeo, Reels, TikTok, Drive) shown on detail page',
   aspect_ratio DECIMAL(6,4) NOT NULL DEFAULT 1.0000 COMMENT 'Computed height / width of main_image',
-  description TEXT NOT NULL,
+  description TEXT NULL,
   tech_tags VARCHAR(255) NULL COMMENT 'Comma-separated tags for Software Development, e.g. React, PostgreSQL, Next.js',
   demo_url VARCHAR(255) NULL COMMENT 'Optional live deployment URL',
   github_url VARCHAR(255) NULL COMMENT 'Optional GitHub repository URL',
-  is_featured TINYINT(1) NOT NULL DEFAULT 0 COMMENT '1 = display on Landing Page featured section',
   sort_order INT UNSIGNED NOT NULL DEFAULT 0,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   INDEX idx_category (category),
-  INDEX idx_featured_created (is_featured, created_at DESC),
   INDEX idx_sort_created (sort_order ASC, created_at DESC, id DESC)
 ) ENGINE=InnoDB;
 
@@ -57,9 +56,3 @@ CREATE TABLE portfolio_details (
     FOREIGN KEY (portfolio_id) REFERENCES portfolios(id)
     ON DELETE CASCADE
 ) ENGINE=InnoDB;
-
--- Default Admin Account (username: admin | password: password, change immediately after setup)
-INSERT INTO users (username, password_hash) VALUES (
-  'admin',
-  '$2y$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi'
-);

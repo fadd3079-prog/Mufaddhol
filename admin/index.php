@@ -63,6 +63,33 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     exit;
   }
 
+  if ($action === 'randomize') {
+    if (!csrf_valid()) {
+      flash_set('error', 'Request rejected. Reload the page and try again.');
+    } else {
+      try {
+        $pdo->beginTransaction();
+        $ids = array_map('intval', $pdo->query('SELECT id FROM portfolios')->fetchAll(PDO::FETCH_COLUMN));
+        if (count($ids) > 1) {
+          shuffle($ids);
+          $upd = $pdo->prepare('UPDATE portfolios SET sort_order = ? WHERE id = ?');
+          foreach ($ids as $pos => $pid) {
+            $upd->execute([$pos + 1, $pid]);
+          }
+        }
+        $pdo->commit();
+        flash_set('success', 'Portfolio order randomized.');
+      } catch (PDOException $e) {
+        if ($pdo->inTransaction()) {
+          $pdo->rollBack();
+        }
+        flash_set('error', 'Could not randomize order.');
+      }
+    }
+    header('Location: index.php');
+    exit;
+  }
+
   $id = filter_var($_POST['id'] ?? null, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
 
   if (!csrf_valid() || $id === false) {
@@ -107,21 +134,13 @@ if (!in_array($categoryFilter, CATEGORIES, true)) {
 }
 
 $categoryCounts = array_fill_keys(CATEGORIES, 0);
-$counters = ['total' => 0, 'featured' => 0];
+$counters = ['total' => 0];
 $rows = [];
 $loadError = false;
 
 try {
   $pdo = db();
-  $counts = $pdo->query(
-    'SELECT COUNT(*) AS total,
-            COALESCE(SUM(is_featured = 1), 0) AS featured
-     FROM portfolios'
-  )->fetch();
-  $counters = [
-    'total' => (int) $counts['total'],
-    'featured' => (int) $counts['featured'],
-  ];
+  $counters['total'] = (int) $pdo->query('SELECT COUNT(*) FROM portfolios')->fetchColumn();
 
   $catStmt = $pdo->query('SELECT category, COUNT(*) AS cnt FROM portfolios GROUP BY category');
   foreach ($catStmt->fetchAll() as $catRow) {
@@ -131,7 +150,7 @@ try {
     }
   }
 
-  $sql = 'SELECT p.id, p.title, p.category, p.media_mode, p.main_image, p.is_featured, COUNT(d.id) AS detail_count
+  $sql = 'SELECT p.id, p.title, p.category, p.media_mode, p.main_image, COUNT(d.id) AS detail_count
             FROM portfolios p
             LEFT JOIN portfolio_details d ON d.portfolio_id = p.id';
   $where = [];
@@ -156,11 +175,23 @@ try {
   $loadError = true;
 }
 
+$clearDraftKey = (string) ($_SESSION['clear_draft_key'] ?? '');
+unset($_SESSION['clear_draft_key']);
+
 admin_start('Portfolio');
 ?>
-<div class="admin-head">
+<div class="admin-head"<?= $clearDraftKey !== '' ? ' data-clear-draft="' . e($clearDraftKey) . '"' : '' ?>>
   <h1>Portfolio</h1>
-  <a class="btn" href="form.php">+ Add Portfolio</a>
+  <div class="admin-head_actions">
+    <?php if (!$loadError && $counters['total'] > 1): ?>
+      <form method="post">
+        <?= csrf_field() ?>
+        <input type="hidden" name="action" value="randomize">
+        <button type="submit" class="btn btn--outline">Randomize Order</button>
+      </form>
+    <?php endif; ?>
+    <a class="btn" href="form.php">+ Add Portfolio</a>
+  </div>
 </div>
 
 <?php if ($loadError): ?>
@@ -170,10 +201,6 @@ admin_start('Portfolio');
     <div>
       <dt>Total Works</dt>
       <dd><?= $counters['total'] ?></dd>
-    </div>
-    <div>
-      <dt>Featured Works</dt>
-      <dd><?= $counters['featured'] ?></dd>
     </div>
     <?php foreach ($categoryCounts as $catLabel => $catTotal): ?>
       <div>
@@ -218,7 +245,6 @@ admin_start('Portfolio');
             <th scope="col">Title</th>
             <th scope="col">Category</th>
             <th scope="col">Media</th>
-            <th scope="col">Featured</th>
             <th scope="col" class="table_num">Details</th>
             <th scope="col" class="table_actions-head"><span class="visually-hidden">Actions</span></th>
           </tr>
@@ -235,14 +261,13 @@ admin_start('Portfolio');
               <td class="table_title"><?= e($row['title']) ?></td>
               <td class="table_cell-muted"><?= e($row['category']) ?></td>
               <td class="table_cell-muted"><?= e(MEDIA_MODES[$row['media_mode']] ?? $row['media_mode']) ?></td>
-              <td><?= $row['is_featured'] ? '<span class="status status--active">Featured</span>' : '<span class="status">Standard</span>' ?></td>
               <td class="table_num"><?= (int) $row['detail_count'] ?></td>
               <td class="table_actions">
                 <div class="table_actions-inner">
                   <a class="btn btn--outline table_icon-btn" href="form.php?id=<?= (int) $row['id'] ?>" aria-label="Edit <?= e($row['title']) ?>" title="Edit">
                     <img src="../assets/icons/edit.svg" alt="" width="16" height="16" aria-hidden="true">
                   </a>
-                  <form method="post" data-confirm="Delete &quot;<?= e($row['title']) ?>&quot; and all of its files? This cannot be undone.">
+                  <form method="post" data-confirm="Confirm delete?">
                     <?= csrf_field() ?>
                     <input type="hidden" name="action" value="delete">
                     <input type="hidden" name="id" value="<?= (int) $row['id'] ?>">
@@ -259,4 +284,11 @@ admin_start('Portfolio');
     </div>
   <?php endif; ?>
 <?php endif; ?>
+<dialog id="confirm-dialog" class="confirm-dialog" aria-labelledby="confirm-dialog-title">
+  <p id="confirm-dialog-title" class="confirm-dialog_title">Confirm delete?</p>
+  <div class="confirm-dialog_actions">
+    <button type="button" class="btn btn--outline" data-confirm-cancel>Cancel</button>
+    <button type="button" class="btn btn--danger" data-confirm-ok>Delete</button>
+  </div>
+</dialog>
 <?php admin_end();

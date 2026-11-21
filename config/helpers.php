@@ -46,6 +46,178 @@ function e(?string $value): string
     return htmlspecialchars((string) $value, ENT_QUOTES, 'UTF-8');
 }
 
+function render_markdown_inline(string $text): string
+{
+    $codes = [];
+    $escaped = e($text);
+    $escaped = preg_replace_callback('/`([^`\n]+)`/', static function (array $m) use (&$codes): string {
+        $key = "\x01CODE" . count($codes) . "\x01";
+        $codes[$key] = '<code>' . $m[1] . '</code>';
+        return $key;
+    }, $escaped);
+
+    $escaped = preg_replace_callback(
+        '/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/i',
+        static fn(array $m): string => '<a href="' . $m[2] . '" target="_blank" rel="noopener noreferrer">' . $m[1] . '</a>',
+        $escaped
+    );
+    $escaped = preg_replace('/\*\*\*([^\s*](?:[^*]*?[^\s*])?)\*\*\*|(?<!\w)___([^\s_](?:[^_]*?[^\s_])?)___(?!\w)/', '<strong><em>$1$2</em></strong>', $escaped);
+    $escaped = preg_replace('/\*\*([^\s*](?:[^*]*?[^\s*])?)\*\*|(?<!\w)__([^\s_](?:[^_]*?[^\s_])?)__(?!\w)/', '<strong>$1$2</strong>', $escaped);
+    $escaped = preg_replace('/~~([^\s~](?:[^~]*?[^\s~])?)~~/', '<del>$1</del>', $escaped);
+    $escaped = preg_replace('/(?<!\*)\*([^\s*](?:[^*]*?[^\s*])?)\*(?!\*)|(?<!\w)_([^\s_](?:[^_]*?[^\s_])?)_(?!\w)/', '<em>$1$2</em>', $escaped);
+
+    return $codes ? strtr($escaped, $codes) : $escaped;
+}
+
+/**
+ * Lightweight, XSS-safe native Markdown renderer for portfolio descriptions.
+ */
+function render_markdown(?string $raw): string
+{
+    $text = trim(str_replace(["\r\n", "\r"], "\n", (string) $raw));
+    if ($text === '') {
+        return '';
+    }
+
+    $lines = explode("\n", $text);
+    $html = [];
+    $paragraph = [];
+    $listType = null;
+    $listItems = [];
+    $quoteLines = [];
+    $inCodeBlock = false;
+    $codeLines = [];
+
+    $flushParagraph = static function () use (&$paragraph, &$html): void {
+        if (!$paragraph) {
+            return;
+        }
+        $rendered = array_map(static fn(string $line): string => render_markdown_inline($line), $paragraph);
+        $html[] = '<p>' . implode("<br>\n", $rendered) . '</p>';
+        $paragraph = [];
+    };
+
+    $flushList = static function () use (&$listType, &$listItems, &$html): void {
+        if (!$listItems || $listType === null) {
+            return;
+        }
+        $items = array_map(static fn(string $item): string => '<li>' . render_markdown_inline($item) . '</li>', $listItems);
+        $html[] = '<' . $listType . '>' . implode('', $items) . '</' . $listType . '>';
+        $listType = null;
+        $listItems = [];
+    };
+
+    $flushQuote = static function () use (&$quoteLines, &$html): void {
+        if (!$quoteLines) {
+            return;
+        }
+        $rendered = array_map(static fn(string $line): string => render_markdown_inline($line), $quoteLines);
+        $html[] = '<blockquote><p>' . implode("<br>\n", $rendered) . '</p></blockquote>';
+        $quoteLines = [];
+    };
+
+    $flushCode = static function () use (&$inCodeBlock, &$codeLines, &$html): void {
+        if (!$inCodeBlock) {
+            return;
+        }
+        $html[] = '<pre><code>' . e(implode("\n", $codeLines)) . '</code></pre>';
+        $inCodeBlock = false;
+        $codeLines = [];
+    };
+
+    foreach ($lines as $line) {
+        $trimmed = trim($line);
+
+        if (preg_match('/^```/', $trimmed)) {
+            if ($inCodeBlock) {
+                $flushCode();
+            } else {
+                $flushParagraph();
+                $flushList();
+                $flushQuote();
+                $inCodeBlock = true;
+                $codeLines = [];
+            }
+            continue;
+        }
+
+        if ($inCodeBlock) {
+            $codeLines[] = $line;
+            continue;
+        }
+
+        if ($trimmed === '') {
+            $flushParagraph();
+            $flushList();
+            $flushQuote();
+            continue;
+        }
+
+        if (preg_match('/^(?:-{3,}|\*{3,}|_{3,})$/', $trimmed)) {
+            $flushParagraph();
+            $flushList();
+            $flushQuote();
+            $html[] = '<hr>';
+            continue;
+        }
+
+        if (preg_match('/^(#{1,6})\s+(.+)$/', $trimmed, $m)) {
+            $flushParagraph();
+            $flushList();
+            $flushQuote();
+            $tag = strlen($m[1]) === 1 ? 'h3' : 'h4';
+            $html[] = '<' . $tag . '>' . render_markdown_inline($m[2]) . '</' . $tag . '>';
+            continue;
+        }
+
+        if (preg_match('/^>\s?(.*)$/', $trimmed, $m)) {
+            $flushParagraph();
+            $flushList();
+            $quoteLines[] = $m[1];
+            continue;
+        }
+
+        if (preg_match('/^[-*+]\s+(.+)$/', $trimmed, $m)) {
+            $flushParagraph();
+            $flushQuote();
+            if ($listType !== 'ul') {
+                $flushList();
+                $listType = 'ul';
+            }
+            $listItems[] = $m[1];
+            continue;
+        }
+
+        if (preg_match('/^\d+[.)]\s+(.+)$/', $trimmed, $m)) {
+            $flushParagraph();
+            $flushQuote();
+            if ($listType !== 'ol') {
+                $flushList();
+                $listType = 'ol';
+            }
+            $listItems[] = $m[1];
+            continue;
+        }
+
+        if ($listType !== null && preg_match('/^\s{2,}\S/', $line) && $listItems) {
+            $lastIdx = count($listItems) - 1;
+            $listItems[$lastIdx] .= ' ' . $trimmed;
+            continue;
+        }
+
+        $flushList();
+        $flushQuote();
+        $paragraph[] = $trimmed;
+    }
+
+    $flushCode();
+    $flushParagraph();
+    $flushList();
+    $flushQuote();
+
+    return implode("\n", $html);
+}
+
 function asset_url(string $path, string $prefix = ''): string
 {
     $full = __DIR__ . '/../' . ltrim($path, '/');
@@ -146,6 +318,107 @@ function clean_url(?string $url): ?string
         throw new InvalidArgumentException('URL must start with http:// or https:// and be at most 255 characters.');
     }
     return $url;
+}
+
+/**
+ * Parses a public video URL (YouTube, Vimeo, Google Drive, TikTok, Instagram)
+ * into an iframe embed URL when supported, or returns null embed_url for fallback links.
+ *
+ * @return array{provider:string,embed_url:?string,aspect:string,portrait:bool,url:string}
+ */
+function parse_external_video(string $url): array
+{
+    $url = trim($url);
+    $parts = parse_url($url);
+    $host = strtolower((string) ($parts['host'] ?? ''));
+    $host = preg_replace('/^www\./', '', $host);
+    $path = (string) ($parts['path'] ?? '');
+    parse_str((string) ($parts['query'] ?? ''), $query);
+
+    if (in_array($host, ['youtube.com', 'm.youtube.com', 'youtube-nocookie.com', 'youtu.be'], true)) {
+        $id = null;
+        $isShort = false;
+        if ($host === 'youtu.be') {
+            $id = explode('/', trim($path, '/'))[0] ?? '';
+        } elseif (preg_match('#^/(shorts|embed|live)/([A-Za-z0-9_-]{6,20})#', $path, $m)) {
+            $id = $m[2];
+            $isShort = $m[1] === 'shorts';
+        } elseif (!empty($query['v']) && is_string($query['v'])) {
+            $id = $query['v'];
+        }
+        if ($id !== null && preg_match('/^[A-Za-z0-9_-]{6,20}$/', $id)) {
+            return [
+                'provider' => 'YouTube',
+                'embed_url' => 'https://www.youtube-nocookie.com/embed/' . $id . '?rel=0',
+                'aspect' => $isShort ? '9 / 16' : '16 / 9',
+                'portrait' => $isShort,
+                'url' => $url,
+            ];
+        }
+    }
+
+    if (in_array($host, ['vimeo.com', 'player.vimeo.com'], true)) {
+        if (preg_match('#/(?:video/)?(\d{5,15})(?:$|[/?])#', $path, $m)) {
+            return [
+                'provider' => 'Vimeo',
+                'embed_url' => 'https://player.vimeo.com/video/' . $m[1],
+                'aspect' => '16 / 9',
+                'portrait' => false,
+                'url' => $url,
+            ];
+        }
+    }
+
+    if ($host === 'drive.google.com') {
+        $id = null;
+        if (preg_match('#^/file/d/([A-Za-z0-9_-]{10,80})#', $path, $m)) {
+            $id = $m[1];
+        } elseif (!empty($query['id']) && is_string($query['id']) && preg_match('/^[A-Za-z0-9_-]{10,80}$/', $query['id'])) {
+            $id = $query['id'];
+        }
+        if ($id !== null) {
+            return [
+                'provider' => 'Google Drive',
+                'embed_url' => 'https://drive.google.com/file/d/' . $id . '/preview',
+                'aspect' => '16 / 9',
+                'portrait' => false,
+                'url' => $url,
+            ];
+        }
+    }
+
+    if (in_array($host, ['tiktok.com', 'm.tiktok.com'], true)) {
+        if (preg_match('#/video/(\d{8,25})#', $path, $m)) {
+            return [
+                'provider' => 'TikTok',
+                'embed_url' => 'https://www.tiktok.com/embed/v2/' . $m[1],
+                'aspect' => '9 / 16',
+                'portrait' => true,
+                'url' => $url,
+            ];
+        }
+    }
+
+    if ($host === 'instagram.com') {
+        if (preg_match('#^/(reel|reels|p|tv)/([A-Za-z0-9_-]{5,30})#', $path, $m)) {
+            $type = $m[1] === 'reels' ? 'reel' : $m[1];
+            return [
+                'provider' => 'Instagram',
+                'embed_url' => 'https://www.instagram.com/' . $type . '/' . $m[2] . '/embed',
+                'aspect' => '9 / 16',
+                'portrait' => true,
+                'url' => $url,
+            ];
+        }
+    }
+
+    return [
+        'provider' => 'External Video',
+        'embed_url' => null,
+        'aspect' => '16 / 9',
+        'portrait' => false,
+        'url' => $url,
+    ];
 }
 
 /* Uploads */
@@ -293,6 +566,8 @@ function render_card(array $row, string $prefix = ''): string
         $media = '<img src="' . $image . '" alt="' . $title . '" width="' . $intrinsicWidth . '" height="' . $intrinsicHeight . '" loading="lazy" decoding="async" draggable="false">';
         if ($mode === 'hover_video' && $video !== '') {
             $media .= '<video data-src="' . $video . '" width="' . $intrinsicWidth . '" height="' . $intrinsicHeight . '" preload="none" muted loop playsinline disablePictureInPicture controlsList="nodownload" aria-hidden="true"></video>';
+            $mediaBadge = '<span class="porto-card_badge" aria-hidden="true"><svg viewBox="0 0 16 16" width="12" height="12"><path d="M5 3.5v9l7-4.5-7-4.5Z" fill="currentColor"/></svg></span>';
+        } elseif ($mode !== 'image_only' && !empty($row['video_url'])) {
             $mediaBadge = '<span class="porto-card_badge" aria-hidden="true"><svg viewBox="0 0 16 16" width="12" height="12"><path d="M5 3.5v9l7-4.5-7-4.5Z" fill="currentColor"/></svg></span>';
         }
     }

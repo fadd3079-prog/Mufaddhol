@@ -5,27 +5,56 @@ declare(strict_types=1);
 require_once __DIR__ . '/config/layout.php';
 
 $works = [];
+$archiveWorks = [];
 $tags = [];
 $categoryCounts = array_fill_keys(CATEGORIES, 0);
 $loadError = false;
 try {
-  $works = db()->query('SELECT * FROM portfolios ORDER BY sort_order ASC, created_at DESC, id DESC')->fetchAll();
-  $seen = [];
+  $works = db()->query('SELECT id, category, title, media_mode, main_image, main_video, video_url, aspect_ratio, tech_tags FROM portfolios ORDER BY sort_order ASC, created_at DESC, id DESC')->fetchAll();
+  $tagStats = [];
   foreach ($works as $row) {
     if (isset($categoryCounts[$row['category']])) {
       $categoryCounts[$row['category']]++;
     }
-    if ($row['category'] !== 'Software Development') {
-      continue;
-    }
-    foreach (splitTags($row['tech_tags']) as $tag) {
-      $key = mb_strtolower($tag);
-      if (!isset($seen[$key])) {
-        $seen[$key] = true;
-        $tags[] = $tag;
+    $itemTags = [];
+    if ($row['category'] === 'Software Development') {
+      $seenInRow = [];
+      foreach (splitTags($row['tech_tags']) as $tag) {
+        $key = mb_strtolower($tag);
+        $itemTags[] = $key;
+        if (!isset($seenInRow[$key])) {
+          $seenInRow[$key] = true;
+          if (!isset($tagStats[$key])) {
+            $tagStats[$key] = ['label' => $tag, 'count' => 0];
+          }
+          $tagStats[$key]['count']++;
+        }
       }
     }
+    $ratio = (float) ($row['aspect_ratio'] ?? 1.0);
+    if ($ratio <= 0) {
+      $ratio = 1.0;
+    }
+    $archiveWorks[] = [
+      'i' => (int) $row['id'],
+      'c' => (string) $row['category'],
+      't' => (string) $row['title'],
+      'tl' => mb_strtolower((string) $row['title']),
+      'tags' => $itemTags,
+      'tagsStr' => implode(',', $itemTags),
+      'm' => (string) $row['media_mode'],
+      'img' => (string) $row['main_image'],
+      'vid' => $row['main_video'] ? (string) $row['main_video'] : null,
+      'ext' => !empty($row['video_url']) ? 1 : 0,
+      'r' => round($ratio, 4),
+    ];
   }
+  $popularTags = array_filter($tagStats, static fn(array $entry): bool => $entry['count'] >= 2);
+  if (count($popularTags) === 0) {
+    $popularTags = $tagStats;
+  }
+  uasort($popularTags, static fn(array $a, array $b): int => ($b['count'] <=> $a['count']) ?: strnatcasecmp($a['label'], $b['label']));
+  $tags = array_map(static fn(array $entry): string => $entry['label'], array_slice(array_values($popularTags), 0, 6));
   sort($tags, SORT_NATURAL | SORT_FLAG_CASE);
 } catch (PDOException $e) {
   $loadError = true;
@@ -90,20 +119,20 @@ render_nav('portfolio');
             </div>
           </div>
           <?php if (count($tags) > 0): ?>
-            <div class="filters_tags" id="tag-strip" role="group" aria-label="Filter software by technology stack" hidden>
-              <span class="filters_label" aria-hidden="true">Stack</span>
-              <?php foreach ($tags as $tag): ?>
-                <button type="button" class="chip" data-tag="<?= e(mb_strtolower($tag)) ?>" aria-pressed="false"><?= e($tag) ?></button>
-              <?php endforeach; ?>
+            <div class="filters_tags" id="tag-strip" hidden>
+              <label class="filters_label" for="tag-select">Stack</label>
+              <select id="tag-select" class="stack-select">
+                <option value="">All Stacks</option>
+                <?php foreach ($tags as $tag): ?>
+                  <option value="<?= e(mb_strtolower($tag)) ?>"><?= e($tag) ?></option>
+                <?php endforeach; ?>
+              </select>
             </div>
           <?php endif; ?>
         </div>
 
-        <div id="masonry-grid" class="masonry" data-nav-section="Works">
-          <?php foreach ($works as $row) {
-            echo render_card($row), "\n";
-          } ?>
-        </div>
+        <div id="masonry-grid" class="masonry is-masonry" data-nav-section="Works"></div>
+        <script id="archive-data" type="application/json"><?= json_encode($archiveWorks, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP) ?></script>
         <div id="empty-state" class="state" hidden>
           <p class="state_title">No works match the active filters</p>
           <p>Try clearing the search query or switching to another discipline category.</p>
