@@ -5,6 +5,12 @@ declare(strict_types=1);
 require_once __DIR__ . '/_layout.php';
 require_admin();
 
+if (is_viewer()) {
+    flash_set('error', 'Demo viewer account is read-only. Account settings are disabled.');
+    header('Location: index.php');
+    exit;
+}
+
 $adminId = (int) $_SESSION['admin_id'];
 $errors = [];
 $user = null;

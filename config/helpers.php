@@ -337,6 +337,16 @@ function login_attempt_clear(PDO $pdo, string $scopeUser, string $ip): void
     }
 }
 
+function admin_role(): string
+{
+    return ($_SESSION['admin_role'] ?? 'admin') === 'viewer' ? 'viewer' : 'admin';
+}
+
+function is_viewer(): bool
+{
+    return isset($_SESSION['admin_id']) && admin_role() === 'viewer';
+}
+
 function require_admin(): void
 {
     ensure_session();
@@ -353,6 +363,24 @@ function require_admin(): void
         session_destroy();
         header('Location: login.php?expired=1');
         exit;
+    }
+    try {
+        $stmt = db()->prepare('SELECT role FROM users WHERE id = ?');
+        $stmt->execute([(int) $_SESSION['admin_id']]);
+        $dbRole = $stmt->fetchColumn();
+        if ($dbRole === false) {
+            $_SESSION = [];
+            if (ini_get('session.use_cookies')) {
+                $p = session_get_cookie_params();
+                setcookie(session_name(), '', time() - 42000, $p['path'], $p['domain'], $p['secure'], $p['httponly']);
+            }
+            session_destroy();
+            header('Location: login.php');
+            exit;
+        }
+        $_SESSION['admin_role'] = ($dbRole === 'viewer') ? 'viewer' : 'admin';
+    } catch (PDOException $e) {
+        // Keep current session state so DB error UI renders cleanly.
     }
     $_SESSION['last_activity'] = time();
 }

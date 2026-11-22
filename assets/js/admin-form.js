@@ -298,7 +298,7 @@
 
   const portfolioTable = document.getElementById('portfolio-table');
   const tableStatus = document.getElementById('table-status');
-  if (portfolioTable) {
+  if (portfolioTable && portfolioTable.dataset.readonly !== '1') {
     const tbody = portfolioTable.querySelector('tbody');
     const csrfToken = portfolioTable.dataset.csrf || '';
     let statusTimer = null;
@@ -498,6 +498,11 @@
 
   const form = document.getElementById('portfolio-form');
   if (!form) return;
+
+  const isReadonlyForm = form.dataset.readonly === '1';
+  if (isReadonlyForm) {
+    form.addEventListener('submit', (e) => e.preventDefault());
+  }
 
   const category = form.elements.category;
   const modes = Array.from(form.querySelectorAll('input[name="media_mode"]'));
@@ -783,7 +788,7 @@
     bindDropzone(detailsZone, detailsInput, addDetailFiles);
   }
 
-  const draftKey = form.dataset.draftKey || '';
+  const draftKey = isReadonlyForm ? '' : (form.dataset.draftKey || '');
   const draftStorageKey = draftKey ? `portfolio-draft:${draftKey}` : '';
 
   function saveDraftFields() {

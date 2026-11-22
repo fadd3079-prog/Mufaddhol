@@ -5,9 +5,23 @@ declare(strict_types=1);
 require_once __DIR__ . '/_layout.php';
 require_admin();
 
+$isViewer = is_viewer();
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
   $pdo = db();
   $action = (string) ($_POST['action'] ?? '');
+
+  if ($isViewer) {
+    if ($action === 'reorder') {
+      header('Content-Type: application/json; charset=utf-8');
+      http_response_code(403);
+      echo json_encode(['status' => 'error', 'message' => 'Demo viewer is read-only. Changes cannot be saved.']);
+      exit;
+    }
+    flash_set('error', 'Demo viewer is read-only. Nothing was changed.');
+    header('Location: index.php');
+    exit;
+  }
 
   if ($action === 'reorder') {
     header('Content-Type: application/json; charset=utf-8');
@@ -183,7 +197,7 @@ admin_start('Portfolio');
 <div class="admin-head"<?= $clearDraftKey !== '' ? ' data-clear-draft="' . e($clearDraftKey) . '"' : '' ?>>
   <h1>Portfolio</h1>
   <div class="admin-head_actions">
-    <?php if (!$loadError && $counters['total'] > 1): ?>
+    <?php if (!$isViewer && !$loadError && $counters['total'] > 1): ?>
       <form method="post">
         <?= csrf_field() ?>
         <input type="hidden" name="action" value="randomize">
@@ -237,46 +251,54 @@ admin_start('Portfolio');
   <?php else: ?>
     <p id="table-status" class="table-status" role="status" aria-live="polite" hidden></p>
     <div class="table-wrap">
-      <table class="table" id="portfolio-table" data-csrf="<?= e(csrf_token()) ?>">
+      <table class="table" id="portfolio-table" data-csrf="<?= e(csrf_token()) ?>" data-readonly="<?= $isViewer ? '1' : '0' ?>">
         <thead>
           <tr>
-            <th scope="col" class="table_sort-head"><span class="visually-hidden">Order</span></th>
+            <?php if (!$isViewer): ?>
+              <th scope="col" class="table_sort-head"><span class="visually-hidden">Order</span></th>
+            <?php endif; ?>
             <th scope="col">Cover</th>
             <th scope="col">Title</th>
             <th scope="col">Category</th>
             <th scope="col">Media</th>
             <th scope="col" class="table_num">Details</th>
-            <th scope="col" class="table_actions-head"><span class="visually-hidden">Actions</span></th>
+            <?php if (!$isViewer): ?>
+              <th scope="col" class="table_actions-head"><span class="visually-hidden">Actions</span></th>
+            <?php endif; ?>
           </tr>
         </thead>
         <tbody>
           <?php foreach ($rows as $row): ?>
             <tr data-id="<?= (int) $row['id'] ?>">
-              <td class="table_sort">
-                <button type="button" class="sort-handle" aria-label="Reorder <?= e($row['title']) ?> (drag or press Up/Down)" title="Drag to reorder">
-                  <img src="../assets/icons/sort.svg" alt="" width="16" height="16" aria-hidden="true">
-                </button>
-              </td>
+              <?php if (!$isViewer): ?>
+                <td class="table_sort">
+                  <button type="button" class="sort-handle" aria-label="Reorder <?= e($row['title']) ?> (drag or press Up/Down)" title="Drag to reorder">
+                    <img src="../assets/icons/sort.svg" alt="" width="16" height="16" aria-hidden="true">
+                  </button>
+                </td>
+              <?php endif; ?>
               <td><img class="table_thumb" src="../<?= e($row['main_image']) ?>" alt="" width="52" height="52" loading="lazy"></td>
               <td class="table_title"><?= e($row['title']) ?></td>
               <td class="table_cell-muted"><?= e($row['category']) ?></td>
               <td class="table_cell-muted"><?= e(MEDIA_MODES[$row['media_mode']] ?? $row['media_mode']) ?></td>
               <td class="table_num"><?= (int) $row['detail_count'] ?></td>
-              <td class="table_actions">
-                <div class="table_actions-inner">
-                  <a class="btn btn--outline table_icon-btn" href="form.php?id=<?= (int) $row['id'] ?>" aria-label="Edit <?= e($row['title']) ?>" title="Edit">
-                    <img src="../assets/icons/edit.svg" alt="" width="16" height="16" aria-hidden="true">
-                  </a>
-                  <form method="post" data-confirm="Confirm delete?">
-                    <?= csrf_field() ?>
-                    <input type="hidden" name="action" value="delete">
-                    <input type="hidden" name="id" value="<?= (int) $row['id'] ?>">
-                    <button type="submit" class="btn btn--outline btn--danger table_icon-btn" aria-label="Delete <?= e($row['title']) ?>" title="Delete">
-                      <img src="../assets/icons/delete.svg" alt="" width="16" height="16" aria-hidden="true">
-                    </button>
-                  </form>
-                </div>
-              </td>
+              <?php if (!$isViewer): ?>
+                <td class="table_actions">
+                  <div class="table_actions-inner">
+                    <a class="btn btn--outline table_icon-btn" href="form.php?id=<?= (int) $row['id'] ?>" aria-label="Edit <?= e($row['title']) ?>" title="Edit">
+                      <img src="../assets/icons/edit.svg" alt="" width="16" height="16" aria-hidden="true">
+                    </a>
+                    <form method="post" data-confirm="Confirm delete?">
+                      <?= csrf_field() ?>
+                      <input type="hidden" name="action" value="delete">
+                      <input type="hidden" name="id" value="<?= (int) $row['id'] ?>">
+                      <button type="submit" class="btn btn--outline btn--danger table_icon-btn" aria-label="Delete <?= e($row['title']) ?>" title="Delete">
+                        <img src="../assets/icons/delete.svg" alt="" width="16" height="16" aria-hidden="true">
+                      </button>
+                    </form>
+                  </div>
+                </td>
+              <?php endif; ?>
             </tr>
           <?php endforeach; ?>
         </tbody>
@@ -284,11 +306,13 @@ admin_start('Portfolio');
     </div>
   <?php endif; ?>
 <?php endif; ?>
-<dialog id="confirm-dialog" class="confirm-dialog" aria-labelledby="confirm-dialog-title">
-  <p id="confirm-dialog-title" class="confirm-dialog_title">Confirm delete?</p>
-  <div class="confirm-dialog_actions">
-    <button type="button" class="btn btn--outline" data-confirm-cancel>Cancel</button>
-    <button type="button" class="btn btn--danger" data-confirm-ok>Delete</button>
-  </div>
-</dialog>
+<?php if (!$isViewer): ?>
+  <dialog id="confirm-dialog" class="confirm-dialog" aria-labelledby="confirm-dialog-title">
+    <p id="confirm-dialog-title" class="confirm-dialog_title">Confirm delete?</p>
+    <div class="confirm-dialog_actions">
+      <button type="button" class="btn btn--outline" data-confirm-cancel>Cancel</button>
+      <button type="button" class="btn btn--danger" data-confirm-ok>Delete</button>
+    </div>
+  </dialog>
+<?php endif; ?>
 <?php admin_end();

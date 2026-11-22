@@ -30,7 +30,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 usleep(min(10, $attempts - 4) * 400000);
             }
 
-            $stmt = $pdo->prepare('SELECT id, password_hash FROM users WHERE username = ?');
+            $stmt = $pdo->prepare('SELECT id, password_hash, role FROM users WHERE username = ?');
             $stmt->execute([$username]);
             $user = $stmt->fetch();
 
@@ -43,6 +43,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 session_regenerate_id(true);
                 unset($_SESSION['csrf_token']);
                 $_SESSION['admin_id'] = (int) $user['id'];
+                $_SESSION['admin_role'] = (($user['role'] ?? 'admin') === 'viewer') ? 'viewer' : 'admin';
                 $_SESSION['last_activity'] = time();
                 header('Location: index.php');
                 exit;

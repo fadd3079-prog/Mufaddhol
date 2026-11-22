@@ -7,11 +7,18 @@ require_admin();
 
 const ROOT_DIR = __DIR__ . '/..';
 
+$isViewer = is_viewer();
 $pdo = null;
 $item = null;
 $details = [];
 $errors = [];
 $id = filter_input(INPUT_GET, 'id', FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
+
+if ($isViewer && $id) {
+    flash_set('error', 'Demo viewer can only view the portfolio list and the add portfolio form.');
+    header('Location: index.php');
+    exit;
+}
 
 try {
     $pdo = db();
@@ -48,7 +55,9 @@ $vals = [
 ];
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    if (post_exceeds_limit()) {
+    if ($isViewer) {
+        $errors[] = 'Demo viewer is read-only. Changes cannot be saved.';
+    } elseif (post_exceeds_limit()) {
         $errors[] = 'The upload is larger than the server limit (post_max_size ' . ini_get('post_max_size') . '). Use smaller files.';
     } elseif (!csrf_valid()) {
         $errors[] = 'Session expired. Reload the page and try again.';
@@ -257,7 +266,7 @@ admin_start($item ? 'Edit Portfolio' : 'Add Portfolio', true, 'admin--form');
     </div>
 <?php endif; ?>
 
-<form method="post" enctype="multipart/form-data" class="form" id="portfolio-form" data-has-video="<?= $hasExistingVideo ? '1' : '0' ?>" data-editing="<?= $item ? '1' : '0' ?>" data-draft-key="<?= e($draftKey) ?>">
+<form method="post" enctype="multipart/form-data" class="form" id="portfolio-form" data-has-video="<?= $hasExistingVideo ? '1' : '0' ?>" data-editing="<?= $item ? '1' : '0' ?>" data-readonly="<?= $isViewer ? '1' : '0' ?>" data-draft-key="<?= e($draftKey) ?>">
     <?= csrf_field() ?>
     <input type="hidden" name="MAX_FILE_SIZE" value="10485760">
 
@@ -408,7 +417,11 @@ admin_start($item ? 'Edit Portfolio' : 'Add Portfolio', true, 'admin--form');
     </div>
 
     <div class="form_actions">
-        <button type="submit" class="btn"><?= $item ? 'Save Changes' : 'Create Portfolio' ?></button>
+        <?php if ($isViewer): ?>
+            <button type="submit" class="btn" disabled>Create Portfolio (Read-only)</button>
+        <?php else: ?>
+            <button type="submit" class="btn"><?= $item ? 'Save Changes' : 'Create Portfolio' ?></button>
+        <?php endif; ?>
         <a class="btn btn--outline" href="index.php" data-draft-clear>Cancel</a>
     </div>
 </form>

@@ -36,9 +36,14 @@ function admin_start(string $title, bool $withBar = true, string $bodyClass = ''
             <span class="admin-bar_name">Mufaddhol</span>
             <span class="admin-bar_sep" aria-hidden="true">/</span>
             <span class="admin-bar_scope">Admin</span>
+            <?php if (is_viewer()): ?>
+              <span class="admin-bar_role">Viewer</span>
+            <?php endif; ?>
           </a>
           <div class="admin-bar_actions">
-            <a class="admin-bar_link" href="account.php">Account</a>
+            <?php if (!is_viewer()): ?>
+              <a class="admin-bar_link" href="account.php">Account</a>
+            <?php endif; ?>
             <a class="admin-bar_link" href="../index.php">View Site</a>
             <form method="post" action="logout.php">
               <?= csrf_field() ?>
@@ -49,6 +54,9 @@ function admin_start(string $title, bool $withBar = true, string $bodyClass = ''
       </header>
     <?php endif; ?>
     <main id="main" class="admin-main">
+      <?php if ($withBar && is_viewer()): ?>
+        <p class="flash flash--viewer" role="status">Demo viewer mode — read-only preview. Creating, editing, reordering, and deleting are disabled.</p>
+      <?php endif; ?>
       <?php
       $flash = flash_get();
       if ($flash) {
