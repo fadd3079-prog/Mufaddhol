@@ -2,6 +2,8 @@
 
 declare(strict_types=1);
 
+ini_set('display_errors', '0');
+
 require_once __DIR__ . '/database.php';
 
 const CATEGORIES = [
@@ -33,12 +35,64 @@ const UPLOAD_ROOT = __DIR__ . '/../assets/uploads';
 /* Primary contact email; shown as the mailto CTA in the contact band. */
 const CONTACT_EMAIL = 'mufaddhol02@gmail.com';
 
-if (session_status() === PHP_SESSION_NONE) {
+function is_https_request(): bool
+{
+    if (!empty($_SERVER['HTTPS']) && strtolower((string) $_SERVER['HTTPS']) !== 'off') {
+        return true;
+    }
+    if ((int) ($_SERVER['SERVER_PORT'] ?? 0) === 443) {
+        return true;
+    }
+    return strtolower((string) ($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '')) === 'https';
+}
+
+function ensure_session(): void
+{
+    if (session_status() !== PHP_SESSION_NONE) {
+        return;
+    }
+    $isHttps = is_https_request();
+    ini_set('session.use_strict_mode', '1');
+    ini_set('session.gc_maxlifetime', '1800');
+    session_cache_limiter('');
+    if ($isHttps) {
+        session_name('__Host-PHPSESSID');
+    }
     session_set_cookie_params([
+        'lifetime' => 0,
+        'path' => '/',
+        'secure' => $isHttps,
         'httponly' => true,
         'samesite' => 'Lax',
     ]);
     session_start();
+}
+
+function send_security_headers(bool $publicCache = false): void
+{
+    if (headers_sent()) {
+        return;
+    }
+    header(
+        "Content-Security-Policy: default-src 'self'; img-src 'self' data:; media-src 'self'; "
+        . "style-src 'self'; font-src 'self'; script-src 'self'; "
+        . "frame-src https://www.youtube-nocookie.com https://player.vimeo.com "
+        . "https://drive.google.com https://www.tiktok.com https://www.instagram.com; "
+        . "object-src 'none'; base-uri 'self'; frame-ancestors 'self'"
+    );
+    header('X-Frame-Options: SAMEORIGIN');
+    header('X-Content-Type-Options: nosniff');
+    header('Referrer-Policy: strict-origin-when-cross-origin');
+    header('Permissions-Policy: camera=(), microphone=(), geolocation=()');
+    if (is_https_request()) {
+        header('Strict-Transport-Security: max-age=31536000; includeSubDomains');
+    }
+    if ($publicCache) {
+        header('Cache-Control: public, max-age=3600');
+    } else {
+        header('Cache-Control: no-store, no-cache, must-revalidate');
+        header('Pragma: no-cache');
+    }
 }
 
 function e(?string $value): string
@@ -225,18 +279,87 @@ function asset_url(string $path, string $prefix = ''): string
     return $prefix . ltrim($path, '/') . '?v=' . $ver;
 }
 
-/* Auth, CSRF, and flash messages */
+/* Auth, rate limiting, CSRF, and flash messages */
+
+function client_ip(): string
+{
+    $ip = trim((string) ($_SERVER['REMOTE_ADDR'] ?? '0.0.0.0'));
+    return substr($ip !== '' ? $ip : '0.0.0.0', 0, 45);
+}
+
+function login_attempts_count(PDO $pdo, string $scopeUser, string $ip, int $windowMinutes = 15): int
+{
+    try {
+        $stmt = $pdo->prepare(
+            'SELECT attempts, (last_attempt >= DATE_SUB(NOW(), INTERVAL ? MINUTE)) AS active
+             FROM login_attempts WHERE username = ? AND ip = ?'
+        );
+        $stmt->execute([$windowMinutes, mb_substr($scopeUser, 0, 150), $ip]);
+        $row = $stmt->fetch();
+        if (!$row || !(int) $row['active']) {
+            return 0;
+        }
+        return (int) $row['attempts'];
+    } catch (PDOException $e) {
+        return 0;
+    }
+}
+
+function login_attempt_fail(PDO $pdo, string $scopeUser, string $ip): int
+{
+    $count = 1;
+    try {
+        $userKey = mb_substr($scopeUser, 0, 150);
+        $pdo->prepare(
+            'INSERT INTO login_attempts (username, ip, attempts, last_attempt)
+             VALUES (?, ?, 1, NOW())
+             ON DUPLICATE KEY UPDATE
+               attempts = IF(last_attempt < DATE_SUB(NOW(), INTERVAL 15 MINUTE), 1, attempts + 1),
+               last_attempt = NOW()'
+        )->execute([$userKey, $ip]);
+        $count = login_attempts_count($pdo, $userKey, $ip);
+        if ($count >= 5) {
+            usleep(min(5, $count - 4) * 300000);
+        }
+    } catch (PDOException $e) {
+        // Ignore rate-limit storage errors so auth flow stays resilient.
+    }
+    return $count;
+}
+
+function login_attempt_clear(PDO $pdo, string $scopeUser, string $ip): void
+{
+    try {
+        $pdo->prepare('DELETE FROM login_attempts WHERE username = ? AND ip = ?')
+            ->execute([mb_substr($scopeUser, 0, 150), $ip]);
+    } catch (PDOException $e) {
+        // Ignore cleanup errors.
+    }
+}
 
 function require_admin(): void
 {
+    ensure_session();
     if (!isset($_SESSION['admin_id'])) {
         header('Location: login.php');
         exit;
     }
+    if (isset($_SESSION['last_activity']) && (time() - (int) $_SESSION['last_activity']) > 1800) {
+        $_SESSION = [];
+        if (ini_get('session.use_cookies')) {
+            $p = session_get_cookie_params();
+            setcookie(session_name(), '', time() - 42000, $p['path'], $p['domain'], $p['secure'], $p['httponly']);
+        }
+        session_destroy();
+        header('Location: login.php?expired=1');
+        exit;
+    }
+    $_SESSION['last_activity'] = time();
 }
 
 function csrf_token(): string
 {
+    ensure_session();
     if (empty($_SESSION['csrf_token'])) {
         $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
     }
@@ -250,17 +373,20 @@ function csrf_field(): string
 
 function csrf_valid(): bool
 {
+    ensure_session();
     $sent = $_POST['csrf_token'] ?? '';
     return is_string($sent) && $sent !== '' && hash_equals(csrf_token(), $sent);
 }
 
 function flash_set(string $type, string $message): void
 {
+    ensure_session();
     $_SESSION['flash'] = ['type' => $type, 'message' => $message];
 }
 
 function flash_get(): ?array
 {
+    ensure_session();
     $flash = $_SESSION['flash'] ?? null;
     unset($_SESSION['flash']);
     return $flash;
@@ -502,6 +628,15 @@ function store_upload(array $file, string $subdir, array $allowed): array
     $mime = (string) $finfo->file($file['tmp_name']);
     if (!isset($allowed[$mime])) {
         throw new RuntimeException('Unsupported file type: ' . $mime . '.');
+    }
+
+    $size = is_file($file['tmp_name']) ? (int) filesize($file['tmp_name']) : (int) ($file['size'] ?? 0);
+    $isVideo = isset(VIDEO_MIMES[$mime]);
+    $maxBytes = $isVideo ? 10 * 1024 * 1024 : 5 * 1024 * 1024;
+    if ($size <= 0 || $size > $maxBytes) {
+        throw new RuntimeException($isVideo
+            ? 'Video file exceeds the 10 MB limit.'
+            : 'Image file exceeds the 5 MB limit.');
     }
 
     $dir = UPLOAD_ROOT . '/' . $subdir;

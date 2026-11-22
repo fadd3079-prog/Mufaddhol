@@ -138,7 +138,7 @@
     card.classList.remove('is-playing');
   };
 
-  const startCardVideo = (card) => {
+  const startCardVideo = (card, preloadMode = 'metadata') => {
     const vidSrc = card.dataset.videoSrc;
     if (!vidSrc || !card._refs) return;
     if (!card._refs.video) {
@@ -146,7 +146,7 @@
       video.muted = true;
       video.loop = true;
       video.playsInline = true;
-      video.preload = 'auto';
+      video.preload = preloadMode;
       video.disablePictureInPicture = true;
       video.setAttribute('controlsList', 'nodownload');
       video.setAttribute('aria-hidden', 'true');
@@ -214,6 +214,9 @@
         stopCardVideo(el);
         el.dataset.id = String(item.i);
         el.dataset.mode = item.m;
+        const ratio = item.r > 0 ? item.r : 1.0;
+        el.dataset.ratio = String(ratio);
+        el.style.setProperty('--ratio', String(ratio));
         el.dataset.category = item.c;
         el.dataset.videoSrc = item.vid || '';
         if (refs.img.getAttribute('src') !== item.img) {
@@ -356,6 +359,8 @@
       if (emptyState) emptyState.hidden = shown > 0;
       if (resultCount) resultCount.textContent = String(shown);
       if (resultLabel) resultLabel.textContent = shown === 1 ? 'work' : 'works';
+      const pagerWrap = document.querySelector('.archive-pager-wrap');
+      if (pagerWrap) pagerWrap.hidden = Boolean(tagName || queryText);
       recomputeSlots();
     };
 
@@ -464,6 +469,9 @@
         stopCardVideo(el);
         el.dataset.id = String(item.i);
         el.dataset.mode = item.m;
+        const ratio = item.r > 0 ? item.r : 1.0;
+        el.dataset.ratio = String(ratio);
+        el.style.setProperty('--ratio', String(ratio));
         el.dataset.category = item.c;
         el.dataset.videoSrc = item.vid || '';
         refs.img.src = item.img;
@@ -473,9 +481,6 @@
         refs.title.textContent = item.t;
         refs.hit.href = `detail.php?id=${item.i}`;
         refs.hit.setAttribute('aria-label', `Open ${item.t} (${item.c})`);
-      }
-      if (item.m === 'autoplay_video' && item.vid && inView && !document.hidden) {
-        startCardVideo(el);
       }
       refs.img.width = width;
       refs.img.height = height;
@@ -695,14 +700,50 @@
 
     let rafId = 0;
     let lastTime = 0;
+    let lastVideoSync = 0;
     let inView = true;
 
     const syncAutoVideos = (active) => {
+      if (!active || !inView || document.hidden) {
+        for (const row of rows) {
+          for (const slot of row.active) {
+            if (slot.el.dataset.mode === 'autoplay_video' && slot.el._refs?.video) {
+              stopCardVideo(slot.el);
+            }
+          }
+        }
+        return;
+      }
+
+      const candidates = [];
       for (const row of rows) {
+        if (row.el.hidden) continue;
+        const rowWidth = row.lastWidth || row.el.clientWidth;
+        const center = rowWidth / 2;
         for (const slot of row.active) {
           if (slot.el.dataset.mode !== 'autoplay_video' || !slot.el.dataset.videoSrc) continue;
-          if (active) startCardVideo(slot.el);
-          else if (slot.el._refs?.video) slot.el._refs.video.pause();
+          const left = slot.worldX + row.cameraX;
+          const right = left + slot.width;
+          if (right < -40 || left > rowWidth + 40) {
+            if (slot.el._refs?.video) stopCardVideo(slot.el);
+            continue;
+          }
+          const dist = Math.abs((left + right) / 2 - center);
+          candidates.push({ el: slot.el, dist });
+        }
+      }
+
+      candidates.sort((a, b) => a.dist - b.dist);
+      const activeSet = new Set(candidates.slice(0, MAX_PLAYING).map((c) => c.el));
+
+      for (const row of rows) {
+        for (const slot of row.active) {
+          if (slot.el.dataset.mode !== 'autoplay_video') continue;
+          if (activeSet.has(slot.el)) {
+            startCardVideo(slot.el, 'metadata');
+          } else if (slot.el._refs?.video) {
+            stopCardVideo(slot.el);
+          }
         }
       }
     };
@@ -714,6 +755,10 @@
       lastTime = now;
       for (const row of rows) {
         if (!row.el.hidden) syncRowCards(row, dt);
+      }
+      if (now - lastVideoSync >= 240) {
+        lastVideoSync = now;
+        syncAutoVideos(true);
       }
       rafId = requestAnimationFrame(tick);
     };
@@ -822,7 +867,14 @@
 
     tabs.forEach((tab) =>
       tab.addEventListener('click', () => {
-        state.category = tab.dataset.category;
+        const nextCat = tab.dataset.category;
+        if (grid && grid.dataset.paginated === '1') {
+          window.location.href = nextCat === 'All'
+            ? 'portfolio.php'
+            : `portfolio.php?category=${encodeURIComponent(nextCat)}`;
+          return;
+        }
+        state.category = nextCat;
         if (state.category !== 'Software Development') state.tag = null;
         sync();
         applyFilter();
@@ -872,6 +924,10 @@
     const reset = document.getElementById('reset-filters');
     if (reset) {
       reset.addEventListener('click', () => {
+        if (grid && grid.dataset.paginated === '1' && state.category !== 'All') {
+          window.location.href = 'portfolio.php';
+          return;
+        }
         state.category = 'All';
         state.tag = null;
         state.query = '';
@@ -882,18 +938,23 @@
     }
 
     sync();
-    if (state.category !== 'All') {
+    if (state.category !== 'All' && !(grid && grid.dataset.paginated === '1')) {
       applyFilter();
     }
   }
 
-  /* Detail gallery masonry and lightbox */
+  /* Detail showcase & gallery masonry and lightbox */
+
+  document.querySelectorAll('.porto-card[data-ratio]:not(.marquee-card), .detail_media[data-ratio], .detail-tile[data-ratio]').forEach((el) => {
+    if (el.dataset.ratio) el.style.setProperty('--ratio', el.dataset.ratio);
+  });
 
   const detailGrid = document.getElementById('detail-masonry-grid');
   if (detailGrid) {
     const tiles = Array.from(detailGrid.querySelectorAll('.detail-tile'));
     let lastDetailWidth = -1;
     let lastDetailCols = -1;
+    let detailDebounceId = 0;
 
     const detailColumns = () => {
       const w = window.innerWidth;
@@ -941,6 +1002,14 @@
       lastDetailCols = cols;
     };
 
+    const scheduleDetailLayout = () => {
+      if (detailDebounceId) clearTimeout(detailDebounceId);
+      detailDebounceId = setTimeout(() => {
+        detailDebounceId = 0;
+        layoutDetail();
+      }, 150);
+    };
+
     detailGrid.classList.add('is-masonry');
     layoutDetail();
     if (!reducedMotion.matches) {
@@ -952,8 +1021,13 @@
       if (img) {
         const syncImg = () => {
           if (img.naturalWidth > 0 && img.naturalHeight > 0) {
-            tile.dataset.ratio = String(img.naturalHeight / img.naturalWidth);
-            layoutDetail();
+            const actualRatio = img.naturalHeight / img.naturalWidth;
+            const prevRatio = parseFloat(tile.dataset.ratio) || 0;
+            if (Math.abs(actualRatio - prevRatio) >= 0.005) {
+              tile.dataset.ratio = String(actualRatio);
+              tile.style.setProperty('--ratio', String(actualRatio));
+              scheduleDetailLayout();
+            }
           }
         };
         if (img.complete) syncImg();
@@ -963,8 +1037,13 @@
       if (video) {
         video.addEventListener('loadedmetadata', () => {
           if (video.videoWidth > 0 && video.videoHeight > 0) {
-            tile.dataset.ratio = String(video.videoHeight / video.videoWidth);
-            layoutDetail();
+            const actualRatio = video.videoHeight / video.videoWidth;
+            const prevRatio = parseFloat(tile.dataset.ratio) || 0;
+            if (Math.abs(actualRatio - prevRatio) >= 0.005) {
+              tile.dataset.ratio = String(actualRatio);
+              tile.style.setProperty('--ratio', String(actualRatio));
+              scheduleDetailLayout();
+            }
           }
         }, { once: true });
       }

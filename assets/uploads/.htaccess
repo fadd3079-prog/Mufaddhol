@@ -1,4 +1,8 @@
 # Uploaded files are static media only. Never execute scripts from here.
+# NOTE (2026-11-21): "Options -ExecCGI -Indexes" was removed — InfinityFree
+# does not allow Options directives in .htaccess and answers 500 for every
+# file under uploads/ when it is present. XAMPP tolerates it; InfinityFree
+# does not. The FilesMatch block below keeps the PHP-execution protection.
 <IfModule mod_php.c>
   php_flag engine off
 </IfModule>
@@ -13,5 +17,4 @@
   Require all denied
 </FilesMatch>
 
-Options -ExecCGI -Indexes
 RemoveHandler .php .phtml .phar

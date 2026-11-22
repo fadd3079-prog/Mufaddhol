@@ -20,22 +20,37 @@ if ($id !== false && $id !== null) {
 
     if ($item) {
       $detailStmt = $pdo->prepare(
-        'SELECT id, file_path, media_type, caption FROM portfolio_details
+        'SELECT id, file_path, aspect_ratio, media_type, caption FROM portfolio_details
                  WHERE portfolio_id = ? ORDER BY sort_order ASC, id ASC'
       );
       $detailStmt->execute([$id]);
       $details = $detailStmt->fetchAll();
 
-      $navRows = $pdo->query(
-        'SELECT id, title FROM portfolios ORDER BY sort_order ASC, created_at DESC, id DESC'
-      )->fetchAll();
-      foreach ($navRows as $idx => $navRow) {
-        if ((int) $navRow['id'] === $id) {
-          $prevWork = $navRows[$idx - 1] ?? null;
-          $nextWork = $navRows[$idx + 1] ?? null;
-          break;
-        }
-      }
+      $so = (int) $item['sort_order'];
+      $ca = (string) $item['created_at'];
+      $curId = (int) $item['id'];
+
+      $prevStmt = $pdo->prepare(
+        'SELECT id, title FROM portfolios
+         WHERE sort_order < ?
+            OR (sort_order = ? AND created_at > ?)
+            OR (sort_order = ? AND created_at = ? AND id > ?)
+         ORDER BY sort_order DESC, created_at ASC, id ASC
+         LIMIT 1'
+      );
+      $prevStmt->execute([$so, $so, $ca, $so, $ca, $curId]);
+      $prevWork = $prevStmt->fetch() ?: null;
+
+      $nextStmt = $pdo->prepare(
+        'SELECT id, title FROM portfolios
+         WHERE sort_order > ?
+            OR (sort_order = ? AND created_at < ?)
+            OR (sort_order = ? AND created_at = ? AND id < ?)
+         ORDER BY sort_order ASC, created_at DESC, id DESC
+         LIMIT 1'
+      );
+      $nextStmt->execute([$so, $so, $ca, $so, $ca, $curId]);
+      $nextWork = $nextStmt->fetch() ?: null;
     }
   } catch (PDOException $e) {
     $dbError = true;
@@ -56,7 +71,7 @@ render_nav('portfolio');
       <?php if ($dbError): ?>
         <div class="state" role="alert">
           <p class="state_title">Database connection error</p>
-          <p>Could not load this work. Check the connection in <code>config/database.php</code>.</p>
+          <p>Could not load this work. Please try again later.</p>
           <div class="state_actions">
             <a class="btn btn--outline" href="portfolio.php">Back to Archive</a>
           </div>
@@ -87,20 +102,13 @@ render_nav('portfolio');
         $hasMainVideo = $isVideoMode && !$hasExternalVideo && !empty($item['main_video']);
         $detailItems = [];
         foreach ($details as $detail) {
-          $w = 800;
-          $h = 600;
-          $ratio = 0.75;
           if ($detail['media_type'] !== 'video') {
-            $fullPath = __DIR__ . '/' . ltrim((string) $detail['file_path'], '/');
-            $size = is_file($fullPath) ? @getimagesize($fullPath) : false;
-            if ($size && $size[0] > 0 && $size[1] > 0) {
-              $w = (int) $size[0];
-              $h = (int) $size[1];
-              $ratio = $h / $w;
-            } else {
-              $h = 800;
+            $ratio = (float) ($detail['aspect_ratio'] ?? 0);
+            if ($ratio <= 0) {
               $ratio = 1.0;
             }
+            $w = 800;
+            $h = max(360, (int) round($w * $ratio));
           } else {
             $w = 1280;
             $h = 720;
@@ -162,11 +170,11 @@ render_nav('portfolio');
         <article class="detail_header editorial-content">
           <figure class="detail_showcase wrap-media">
             <?php if ($hasMainVideo): ?>
-              <div class="detail_media" style="--ratio:<?= e(number_format($mainRatio, 4, '.', '')) ?>">
+              <div class="detail_media" data-ratio="<?= e(number_format($mainRatio, 4, '.', '')) ?>">
                 <video controls controlsList="nodownload noplaybackrate" disablePictureInPicture autoplay loop muted playsinline poster="<?= e($item['main_image']) ?>" src="<?= e((string) $item['main_video']) ?>"></video>
               </div>
             <?php elseif ($externalVideo && $externalVideo['embed_url'] !== null): ?>
-              <div class="detail_media detail_media--embed" style="--embed-aspect:<?= e($externalVideo['aspect']) ?>">
+              <div class="detail_media detail_media--embed<?= $externalVideo['portrait'] ? ' detail_media--embed-portrait' : '' ?>">
                 <iframe
                   src="<?= e($externalVideo['embed_url']) ?>"
                   title="<?= e($item['title']) ?>"
@@ -182,7 +190,7 @@ render_nav('portfolio');
               <button
                 type="button"
                 class="detail_media detail_media--zoom"
-                style="--ratio:<?= e(number_format($mainRatio, 4, '.', '')) ?>"
+                data-ratio="<?= e(number_format($mainRatio, 4, '.', '')) ?>"
                 data-lightbox-src="<?= e($item['main_image']) ?>"
                 data-lightbox-alt="<?= e($item['title']) ?>"
                 data-lightbox-caption="<?= e($item['title']) ?>"
@@ -242,7 +250,7 @@ render_nav('portfolio');
 
             <div id="detail-masonry-grid" class="detail-masonry">
               <?php foreach ($detailItems as $detail): ?>
-                <figure class="detail-tile" data-ratio="<?= e($detail['ratio']) ?>" style="--ratio:<?= e($detail['ratio']) ?>">
+                <figure class="detail-tile" data-ratio="<?= e($detail['ratio']) ?>">
                   <?php if ($detail['media_type'] === 'video'): ?>
                     <div class="detail-tile_media">
                       <video controls controlsList="nodownload noplaybackrate" disablePictureInPicture playsinline preload="metadata" width="<?= $detail['width'] ?>" height="<?= $detail['height'] ?>" src="<?= e($detail['file_path']) ?>"></video>

@@ -9,11 +9,16 @@ function db(): PDO
         return $pdo;
     }
 
-    $host = getenv('MUFADDHOL_DB_HOST') ?: '127.0.0.1';
-    $port = getenv('MUFADDHOL_DB_PORT') ?: '3306';
-    $name = getenv('MUFADDHOL_DB_NAME') ?: 'mufaddhol_portfolio';
-    $user = getenv('MUFADDHOL_DB_USER') ?: 'root';
-    $pass = getenv('MUFADDHOL_DB_PASS') ?: '';
+    $localFile = __DIR__ . '/database.local.php';
+    $local = is_file($localFile) ? (array) (include $localFile) : [];
+
+    $host = getenv('MUFADDHOL_DB_HOST') ?: ($local['host'] ?? '127.0.0.1');
+    $port = getenv('MUFADDHOL_DB_PORT') ?: ($local['port'] ?? '3306');
+    $name = getenv('MUFADDHOL_DB_NAME') ?: ($local['name'] ?? 'mufaddhol_portfolio');
+    $user = getenv('MUFADDHOL_DB_USER') ?: ($local['user'] ?? 'root');
+    $pass = getenv('MUFADDHOL_DB_PASS') !== false
+        ? (string) getenv('MUFADDHOL_DB_PASS')
+        : (string) ($local['pass'] ?? '');
 
     $pdo = new PDO(
         "mysql:host={$host};port={$port};dbname={$name};charset=utf8mb4",

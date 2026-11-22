@@ -11,6 +11,7 @@ const LINK_INSTAGRAM = 'https://www.instagram.com/fadd.fadhol';
 
 function page_start(string $title, string $bodyClass = ''): void
 {
+  send_security_headers(true);
 ?>
   <!doctype html>
   <html lang="en">

@@ -1,6 +1,12 @@
 (() => {
   'use strict';
 
+  document.addEventListener('contextmenu', (e) => {
+    if (e.target.closest('.admin-bar_brand, .login_brand')) {
+      e.preventDefault();
+    }
+  });
+
   const confirmDialog = document.getElementById('confirm-dialog');
   const confirmTitle = document.getElementById('confirm-dialog-title');
   const confirmCancel = confirmDialog?.querySelector('[data-confirm-cancel]');

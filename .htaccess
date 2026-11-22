@@ -1,0 +1,25 @@
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+
+  # K4 / K8: Deny direct HTTP access to schema, database dumps, config, dotfiles, and backups.
+  RewriteRule ^(database|config)(/|$) - [F,L]
+  RewriteRule (\.bak-|\.sql$) - [F,L]
+
+  # K2: Force HTTPS on public hostnames while allowing local XAMPP HTTP verification.
+  RewriteCond %{HTTPS} !=on
+  RewriteCond %{HTTP:X-Forwarded-Proto} !https [NC]
+  RewriteCond %{HTTP_HOST} !^(127\.0\.0\.1|localhost)(:\d+)?$ [NC]
+  RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [R=301,L]
+</IfModule>
+
+# P1: Gzip compression for HTML, CSS, JS, JSON, SVG, and fonts.
+<IfModule mod_deflate.c>
+  AddOutputFilterByType DEFLATE text/html text/plain text/css text/javascript application/javascript application/x-javascript application/json image/svg+xml font/woff2 font/ttf application/font-woff2
+</IfModule>
+
+# P1: Long-lived immutable caching for versioned and content-hashed static assets.
+<IfModule mod_headers.c>
+  <FilesMatch "\.(css|js|woff2|webp|jpe?g|png|gif|svg|ico|mp4|webm)$">
+    Header set Cache-Control "public, max-age=31536000, immutable"
+  </FilesMatch>
+</IfModule>

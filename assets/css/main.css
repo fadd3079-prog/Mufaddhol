@@ -2176,6 +2176,21 @@ a.tag:hover {
   background: var(--charcoal);
 }
 
+.detail_media--embed-portrait {
+  aspect-ratio: 9 / 16;
+}
+
+.archive-pager-wrap {
+  display: flex;
+  justify-content: center;
+  margin-top: clamp(28px, 4vw, 44px);
+}
+
+.detail_pager-btn.is-active {
+  background: var(--charcoal);
+  color: var(--on-dark);
+}
+
 .detail_media--embed iframe {
   display: block;
   width: 100%;

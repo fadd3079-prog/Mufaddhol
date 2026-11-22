@@ -1,12 +1,17 @@
-# User uploads (keep folder structure and the PHP-execution guard)
+# User uploads (keep folder structure, PHP-execution guard, and index.html directory guards)
 assets/uploads/covers/*
 assets/uploads/videos/*
 assets/uploads/details/*
 !assets/uploads/covers/.gitkeep
 !assets/uploads/videos/.gitkeep
 !assets/uploads/details/.gitkeep
+!assets/uploads/covers/index.html
+!assets/uploads/videos/index.html
+!assets/uploads/details/index.html
 
 # Local environment and secrets
+config/database.local.php
+config/.db_local.php
 .env
 .env.*
 !.env.example
@@ -20,10 +25,11 @@ assets/uploads/details/*
 .DS_Store
 Thumbs.db
 
-# Logs and temp
+# Logs, temp, and backup files
 *.log
 *.tmp
 .tmp_*
+*.bak-*
 
 # Local DB dumps
 *.sql.bak

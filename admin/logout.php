@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../config/helpers.php';
 
+ensure_session();
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && csrf_valid()) {
     $_SESSION = [];
     if (ini_get('session.use_cookies')) {

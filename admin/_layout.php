@@ -6,6 +6,8 @@ require_once __DIR__ . '/../config/helpers.php';
 
 function admin_start(string $title, bool $withBar = true, string $bodyClass = ''): void
 {
+  ensure_session();
+  send_security_headers(false);
 ?>
   <!doctype html>
   <html lang="en">
@@ -29,7 +31,7 @@ function admin_start(string $title, bool $withBar = true, string $bodyClass = ''
     <?php if ($withBar): ?>
       <header class="admin-bar">
         <div class="admin-bar_inner">
-          <a class="admin-bar_brand" href="index.php" oncontextmenu="return false">
+          <a class="admin-bar_brand" href="index.php">
             <img class="admin-bar_logo" src="../assets/favicon.ico" alt="" width="32" height="32" draggable="false">
             <span class="admin-bar_name">Mufaddhol</span>
             <span class="admin-bar_sep" aria-hidden="true">/</span>

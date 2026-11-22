@@ -39,9 +39,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $confirmPassword = (string) ($_POST['confirm_password'] ?? '');
 
         $username = $usernameInput;
+        $ip = client_ip();
+        $rateScope = 'acct:' . (string) $user['username'];
+        $attempts = login_attempts_count($pdo, $rateScope, $ip);
 
-        if ($currentPassword === '' || !password_verify($currentPassword, (string) $user['password_hash'])) {
+        if ($attempts >= 5) {
+            usleep(min(5, $attempts - 4) * 300000);
+            login_attempt_fail($pdo, $rateScope, $ip);
+            $errors[] = 'Too many incorrect password attempts. Try again later.';
+        } elseif ($currentPassword === '' || !password_verify($currentPassword, (string) $user['password_hash'])) {
+            login_attempt_fail($pdo, $rateScope, $ip);
             $errors[] = 'Current password is incorrect.';
+        } else {
+            login_attempt_clear($pdo, $rateScope, $ip);
         }
 
         if ($usernameInput === '') {
@@ -56,8 +66,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $passwordChanged = $newPassword !== '' || $confirmPassword !== '';
 
         if ($passwordChanged) {
-            if (strlen($newPassword) < 8) {
-                $errors[] = 'New password must be at least 8 characters.';
+            if (strlen($newPassword) < 12) {
+                $errors[] = 'New password must be at least 12 characters.';
+            } elseif (!preg_match('/[A-Z]/', $newPassword) || !preg_match('/[a-z]/', $newPassword) || !preg_match('/\d/', $newPassword)) {
+                $errors[] = 'New password must include uppercase, lowercase, and numeric characters.';
             } elseif ($newPassword !== $confirmPassword) {
                 $errors[] = 'New password and confirmation do not match.';
             }
@@ -91,6 +103,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
 
                 session_regenerate_id(true);
+                unset($_SESSION['csrf_token']);
                 $message = ($usernameChanged && $passwordChanged)
                     ? 'Username and password updated.'
                     : ($passwordChanged ? 'Password updated.' : 'Username updated.');
@@ -141,11 +154,11 @@ admin_start('Account Settings', true, 'admin--form');
         <div class="form_row">
             <div class="field">
                 <label for="new_password">New Password</label>
-                <input class="input" type="password" id="new_password" name="new_password" minlength="8" autocomplete="new-password" placeholder="Minimum 8 characters">
+                <input class="input" type="password" id="new_password" name="new_password" minlength="12" autocomplete="new-password" placeholder="Min. 12 chars (A-Z, a-z, 0-9)">
             </div>
             <div class="field">
                 <label for="confirm_password">Confirm New Password</label>
-                <input class="input" type="password" id="confirm_password" name="confirm_password" minlength="8" autocomplete="new-password" placeholder="Repeat new password">
+                <input class="input" type="password" id="confirm_password" name="confirm_password" minlength="12" autocomplete="new-password" placeholder="Repeat new password">
             </div>
         </div>
     </div>
@@ -155,4 +168,4 @@ admin_start('Account Settings', true, 'admin--form');
         <a class="btn btn--outline" href="index.php">Cancel</a>
     </div>
 </form>
-<?php admin_end(false);
+<?php admin_end(true);

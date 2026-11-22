@@ -195,7 +195,7 @@ admin_start('Portfolio');
 </div>
 
 <?php if ($loadError): ?>
-  <p class="state state--error" role="alert">Database unavailable. Check the connection and that <code>database/schema.sql</code> is imported.</p>
+  <p class="state state--error" role="alert">Database unavailable. Please try again later.</p>
 <?php else: ?>
   <dl class="counters">
     <div>

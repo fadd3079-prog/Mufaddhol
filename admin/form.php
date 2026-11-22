@@ -207,11 +207,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     }
                     $stored = store_upload($file, 'details', IMAGE_MIMES + VIDEO_MIMES);
                     $newFiles[] = $stored['path'];
+                    $detailRatio = $stored['media_type'] === 'image'
+                        ? computeAspectRatio(ROOT_DIR . '/' . $stored['path'])
+                        : 0.5625;
                     $caption = mb_substr(trim((string) ($newCaptions[$i] ?? '')), 0, 150);
                     $pdo->prepare(
-                        'INSERT INTO portfolio_details (portfolio_id, file_path, media_type, caption, sort_order)
-                         VALUES (?, ?, ?, ?, ?)'
-                    )->execute([$portfolioId, $stored['path'], $stored['media_type'], $caption === '' ? null : $caption, $nextSort++]);
+                        'INSERT INTO portfolio_details (portfolio_id, file_path, aspect_ratio, media_type, caption, sort_order)
+                         VALUES (?, ?, ?, ?, ?, ?)'
+                    )->execute([$portfolioId, $stored['path'], $detailRatio, $stored['media_type'], $caption === '' ? null : $caption, $nextSort++]);
                 }
 
                 $pdo->commit();
@@ -256,6 +259,7 @@ admin_start($item ? 'Edit Portfolio' : 'Add Portfolio', true, 'admin--form');
 
 <form method="post" enctype="multipart/form-data" class="form" id="portfolio-form" data-has-video="<?= $hasExistingVideo ? '1' : '0' ?>" data-editing="<?= $item ? '1' : '0' ?>" data-draft-key="<?= e($draftKey) ?>">
     <?= csrf_field() ?>
+    <input type="hidden" name="MAX_FILE_SIZE" value="10485760">
 
     <div class="form_section">
         <div class="form_row">

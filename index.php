@@ -45,7 +45,7 @@ try {
     ];
   }
 
-  $detailStmt = db()->query('SELECT id, portfolio_id, file_path, media_type, caption FROM portfolio_details');
+  $detailStmt = db()->query('SELECT id, portfolio_id, file_path, aspect_ratio, media_type, caption FROM portfolio_details');
   foreach ($detailStmt->fetchAll() as $dRow) {
     $pid = (int) $dRow['portfolio_id'];
     if (!isset($workMap[$pid])) {
@@ -69,11 +69,10 @@ try {
         'r' => $parent['r'],
       ];
     } else {
-      $fullPath = __DIR__ . '/' . ltrim($filePath, '/');
-      $size = is_file($fullPath) ? @getimagesize($fullPath) : false;
-      $dRatio = ($size && $size[0] > 0 && $size[1] > 0)
-        ? max(0.45, min(2.2, round($size[1] / $size[0], 4)))
-        : $parent['r'];
+      $dRatio = (float) ($dRow['aspect_ratio'] ?? 0);
+      if ($dRatio <= 0) {
+        $dRatio = $parent['r'];
+      }
 
       $marqueeWorks[] = [
         'k' => 'd-' . (int) $dRow['id'],
@@ -84,7 +83,7 @@ try {
         'img' => $filePath,
         'vid' => null,
         'ext' => 0,
-        'r' => $dRatio,
+        'r' => round($dRatio, 4),
       ];
     }
   }
@@ -176,7 +175,7 @@ render_nav('home');
       <?php if ($loadError): ?>
         <div class="state state--error" role="alert">
           <p class="state_title">Database connection error</p>
-          <p>Works could not be loaded. Verify that MySQL is running and <code>database/schema.sql</code> is imported.</p>
+          <p>Works could not be loaded. Please try again later.</p>
         </div>
       <?php elseif (count($works) === 0): ?>
         <div class="state">

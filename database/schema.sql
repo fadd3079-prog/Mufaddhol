@@ -47,6 +47,7 @@ CREATE TABLE portfolio_details (
   id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
   portfolio_id INT UNSIGNED NOT NULL,
   file_path VARCHAR(255) NOT NULL,
+  aspect_ratio DECIMAL(6,4) NULL COMMENT 'Computed height / width for image attachments',
   media_type ENUM('image', 'video') NOT NULL DEFAULT 'image',
   caption VARCHAR(150) NULL COMMENT 'Optional variant label e.g. Ratio 16:9, Brand Guideline, Dashboard UI',
   sort_order INT UNSIGNED NOT NULL DEFAULT 0,
@@ -55,4 +56,14 @@ CREATE TABLE portfolio_details (
   CONSTRAINT fk_detail_portfolio
     FOREIGN KEY (portfolio_id) REFERENCES portfolios(id)
     ON DELETE CASCADE
+) ENGINE=InnoDB;
+
+-- 4. Login & Credential Check Rate Limiting
+CREATE TABLE login_attempts (
+  username VARCHAR(150) NOT NULL,
+  ip VARCHAR(45) NOT NULL,
+  attempts INT UNSIGNED NOT NULL DEFAULT 0,
+  last_attempt DATETIME NOT NULL,
+  PRIMARY KEY (username, ip),
+  INDEX idx_last_attempt (last_attempt)
 ) ENGINE=InnoDB;

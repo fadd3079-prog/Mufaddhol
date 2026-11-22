@@ -8,27 +8,83 @@ $works = [];
 $archiveWorks = [];
 $tags = [];
 $categoryCounts = array_fill_keys(CATEGORIES, 0);
+$totalAll = 0;
+$filteredTotal = 0;
+$perPage = 24;
+$page = filter_input(INPUT_GET, 'page', FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]) ?: 1;
+$activeCategory = (string) ($_GET['category'] ?? 'All');
+if (!in_array($activeCategory, CATEGORIES, true)) {
+  $activeCategory = 'All';
+}
+$totalPages = 1;
 $loadError = false;
 try {
-  $works = db()->query('SELECT id, category, title, media_mode, main_image, main_video, video_url, aspect_ratio, tech_tags FROM portfolios ORDER BY sort_order ASC, created_at DESC, id DESC')->fetchAll();
-  $tagStats = [];
-  foreach ($works as $row) {
-    if (isset($categoryCounts[$row['category']])) {
-      $categoryCounts[$row['category']]++;
+  $pdo = db();
+
+  $catRows = $pdo->query('SELECT category, COUNT(*) AS cnt FROM portfolios GROUP BY category')->fetchAll();
+  foreach ($catRows as $catRow) {
+    $catName = (string) $catRow['category'];
+    $cnt = (int) $catRow['cnt'];
+    if (isset($categoryCounts[$catName])) {
+      $categoryCounts[$catName] = $cnt;
     }
+    $totalAll += $cnt;
+  }
+
+  $filteredTotal = $activeCategory === 'All' ? $totalAll : (int) ($categoryCounts[$activeCategory] ?? 0);
+  $totalPages = max(1, (int) ceil($filteredTotal / $perPage));
+  if ($page > $totalPages) {
+    $page = $totalPages;
+  }
+  $offset = ($page - 1) * $perPage;
+
+  if ($activeCategory === 'All') {
+    $stmt = $pdo->prepare(
+      'SELECT id, category, title, media_mode, main_image, main_video, video_url, aspect_ratio, tech_tags
+       FROM portfolios
+       ORDER BY sort_order ASC, created_at DESC, id DESC
+       LIMIT ? OFFSET ?'
+    );
+    $stmt->bindValue(1, $perPage, PDO::PARAM_INT);
+    $stmt->bindValue(2, $offset, PDO::PARAM_INT);
+  } else {
+    $stmt = $pdo->prepare(
+      'SELECT id, category, title, media_mode, main_image, main_video, video_url, aspect_ratio, tech_tags
+       FROM portfolios
+       WHERE category = ?
+       ORDER BY sort_order ASC, created_at DESC, id DESC
+       LIMIT ? OFFSET ?'
+    );
+    $stmt->bindValue(1, $activeCategory, PDO::PARAM_STR);
+    $stmt->bindValue(2, $perPage, PDO::PARAM_INT);
+    $stmt->bindValue(3, $offset, PDO::PARAM_INT);
+  }
+  $stmt->execute();
+  $works = $stmt->fetchAll();
+
+  $tagRows = $pdo->query(
+    "SELECT tech_tags FROM portfolios WHERE category = 'Software Development' AND tech_tags IS NOT NULL AND tech_tags <> ''"
+  )->fetchAll(PDO::FETCH_COLUMN);
+  $tagStats = [];
+  foreach ($tagRows as $rawTags) {
+    $seenInRow = [];
+    foreach (splitTags((string) $rawTags) as $tag) {
+      $key = mb_strtolower($tag);
+      if (!isset($seenInRow[$key])) {
+        $seenInRow[$key] = true;
+        if (!isset($tagStats[$key])) {
+          $tagStats[$key] = ['label' => $tag, 'count' => 0];
+        }
+        $tagStats[$key]['count']++;
+      }
+    }
+  }
+
+  foreach ($works as $row) {
     $itemTags = [];
     if ($row['category'] === 'Software Development') {
-      $seenInRow = [];
       foreach (splitTags($row['tech_tags']) as $tag) {
-        $key = mb_strtolower($tag);
-        $itemTags[] = $key;
-        if (!isset($seenInRow[$key])) {
-          $seenInRow[$key] = true;
-          if (!isset($tagStats[$key])) {
-            $tagStats[$key] = ['label' => $tag, 'count' => 0];
-          }
-          $tagStats[$key]['count']++;
-        }
+        $itemTags[] = mb_strtolower($tag);
       }
     }
     $ratio = (float) ($row['aspect_ratio'] ?? 1.0);
@@ -60,7 +116,7 @@ try {
   $loadError = true;
 }
 
-$total = count($works);
+$total = $filteredTotal;
 page_start('Portfolio Archive | Mufaddhol', 'page-portfolio');
 render_nav('portfolio');
 ?>
@@ -81,9 +137,9 @@ render_nav('portfolio');
       <?php if ($loadError): ?>
         <div class="state state--error" role="alert">
           <p class="state_title">Database connection error</p>
-          <p>Works could not be loaded. Verify that MySQL is running and <code>database/schema.sql</code> is imported.</p>
+          <p>Works could not be loaded. Please try again later.</p>
         </div>
-      <?php elseif (count($works) === 0): ?>
+      <?php elseif ($totalAll === 0): ?>
         <div class="state">
           <p class="state_title">No works published yet</p>
           <p>Add the first portfolio item from the administrative panel to populate the archive.</p>
@@ -93,12 +149,12 @@ render_nav('portfolio');
         <div class="filters" id="filters" data-nav-section="Explorer">
           <div class="filters_row">
             <div class="filters_tabs" role="group" aria-label="Filter by category">
-              <button type="button" class="pill is-active" data-category="All" aria-pressed="true">
+              <button type="button" class="pill<?= $activeCategory === 'All' ? ' is-active' : '' ?>" data-category="All" aria-pressed="<?= $activeCategory === 'All' ? 'true' : 'false' ?>">
                 <span>All</span>
-                <span class="pill_count"><?= $total ?></span>
+                <span class="pill_count"><?= $totalAll ?></span>
               </button>
               <?php foreach (CATEGORIES as $category): ?>
-                <button type="button" class="pill" data-category="<?= e($category) ?>" aria-pressed="false">
+                <button type="button" class="pill<?= $activeCategory === $category ? ' is-active' : '' ?>" data-category="<?= e($category) ?>" aria-pressed="<?= $activeCategory === $category ? 'true' : 'false' ?>">
                   <span><?= e($category) ?></span>
                   <span class="pill_count"><?= (int) $categoryCounts[$category] ?></span>
                 </button>
@@ -131,8 +187,53 @@ render_nav('portfolio');
           <?php endif; ?>
         </div>
 
-        <div id="masonry-grid" class="masonry is-masonry" data-nav-section="Works"></div>
+        <div id="masonry-grid" class="masonry is-masonry" data-nav-section="Works" data-paginated="<?= $totalAll > $perPage ? '1' : '0' ?>"></div>
         <script id="archive-data" type="application/json"><?= json_encode($archiveWorks, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP) ?></script>
+        <?php if ($totalPages > 1):
+          $pageBase = $activeCategory !== 'All' ? 'portfolio.php?category=' . urlencode($activeCategory) . '&page=' : 'portfolio.php?page=';
+        ?>
+          <div class="archive-pager-wrap">
+            <nav id="archive-pager" class="detail_pager" aria-label="Archive pages">
+              <?php if ($page > 1): ?>
+                <a class="detail_pager-btn" href="<?= e($pageBase . ($page - 1)) ?>" aria-label="Previous page">
+                  <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+                    <path d="M9.75 3.5 5.25 8l4.5 4.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+                  </svg>
+                  <span class="detail_pager-label">Prev</span>
+                </a>
+              <?php else: ?>
+                <span class="detail_pager-btn is-disabled" aria-disabled="true">
+                  <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+                    <path d="M9.75 3.5 5.25 8l4.5 4.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+                  </svg>
+                  <span class="detail_pager-label">Prev</span>
+                </span>
+              <?php endif; ?>
+              <?php for ($p = 1; $p <= $totalPages; $p++): ?>
+                <?php if ($p === $page): ?>
+                  <span class="detail_pager-btn is-active" aria-current="page"><?= $p ?></span>
+                <?php else: ?>
+                  <a class="detail_pager-btn" href="<?= e($pageBase . $p) ?>"><?= $p ?></a>
+                <?php endif; ?>
+              <?php endfor; ?>
+              <?php if ($page < $totalPages): ?>
+                <a class="detail_pager-btn" href="<?= e($pageBase . ($page + 1)) ?>" aria-label="Next page">
+                  <span class="detail_pager-label">Next</span>
+                  <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+                    <path d="M6.25 3.5 10.75 8l-4.5 4.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+                  </svg>
+                </a>
+              <?php else: ?>
+                <span class="detail_pager-btn is-disabled" aria-disabled="true">
+                  <span class="detail_pager-label">Next</span>
+                  <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+                    <path d="M6.25 3.5 10.75 8l-4.5 4.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+                  </svg>
+                </span>
+              <?php endif; ?>
+            </nav>
+          </div>
+        <?php endif; ?>
         <div id="empty-state" class="state" hidden>
           <p class="state_title">No works match the active filters</p>
           <p>Try clearing the search query or switching to another discipline category.</p>
